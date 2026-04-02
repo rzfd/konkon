@@ -1,0 +1,23 @@
+services:
+  konkon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: konkon:local
+    ports:
+      - "8080:8080"
+    environment:
+      KONKON_LISTEN: ":8080"
+      KONKON_DATA_DIR: /data
+    volumes:
+      - konkon-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  konkon-data:

@@ -1,0 +1,288 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a2332;
+  --text: #e7ecf3;
+  --muted: #8b98a8;
+  --accent: #3d8bfd;
+  --ok: #3ecf8e;
+  --warn: #f0c14b;
+  --err: #f07178;
+  --border: #2a3545;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.top {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #121a24 0%, var(--bg) 100%);
+}
+
+.top h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+}
+
+nav a {
+  color: var(--accent);
+  text-decoration: none;
+  margin-right: 1rem;
+  font-weight: 500;
+}
+
+nav a:hover {
+  text-decoration: underline;
+}
+
+main {
+  padding: 1.5rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+tr:hover td {
+  background: rgba(61, 139, 253, 0.06);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-open {
+  background: rgba(61, 139, 253, 0.2);
+  color: #9dc6ff;
+}
+
+.badge-triage {
+  background: rgba(240, 193, 75, 0.15);
+  color: #ffd479;
+}
+
+.badge-done {
+  background: rgba(62, 207, 142, 0.15);
+  color: #8ee9c1;
+}
+
+label {
+  display: block;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0c1016;
+  color: var(--text);
+  font: inherit;
+}
+
+textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+button,
+.btn {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+button.secondary {
+  background: #2f3d52;
+  color: var(--text);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  color: var(--err);
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.steps li {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.steps li:last-child {
+  border-bottom: none;
+}
+
+.step-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.attach img {
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+
+.hint {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: var(--muted);
+}
+
+code.hint {
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: #0c1016;
+  border: 1px solid var(--border);
+}
+
+.form-hint {
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.case-meta {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.meta-heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.meta-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr 2fr;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+
+.meta-row:last-child {
+  border-bottom: none;
+}
+
+.meta-label {
+  color: var(--text);
+}
+
+.meta-key {
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.meta-val {
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .meta-row {
+    grid-template-columns: 1fr;
+  }
+  .meta-key {
+    margin-top: -0.25rem;
+  }
+}
+
+.step-fields {
+  margin-top: 0.75rem;
+  padding-left: 0.25rem;
+  border-left: 2px solid var(--border);
+}
+
+.step-fields label {
+  margin-top: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.step-fields input {
+  margin-top: 0;
+}
+
+.step-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.step-actions button {
+  margin-top: 0;
+}
