@@ -232,19 +232,48 @@ func ParseSOPSteps(stepsJSON string) ([]SOPStepDef, error) {
 	return defs, nil
 }
 
-// ListCases returns recent cases.
-func (s *Store) ListCases(ctx context.Context, limit int) ([]Case, error) {
-	if limit <= 0 {
-		limit = 100
+// ListCases returns cases with optional filtering and pagination.
+func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]Case, error) {
+	if f.Limit <= 0 {
+		f.Limit = 50
 	}
-	q := `
+	if f.Page <= 0 {
+		f.Page = 1
+	}
+	offset := (f.Page - 1) * f.Limit
+	var conds []string
+	var args []any
+	if f.Status != "" {
+		conds = append(conds, "c.status = ?")
+		args = append(args, f.Status)
+	}
+	if f.Severity != "" {
+		conds = append(conds, "c.severity = ?")
+		args = append(args, f.Severity)
+	}
+	if f.Service != "" {
+		conds = append(conds, "LOWER(c.service) LIKE ?")
+		args = append(args, "%"+strings.ToLower(f.Service)+"%")
+	}
+	if f.Search != "" {
+		conds = append(conds, "(LOWER(c.title) LIKE ? OR LOWER(c.case_id) LIKE ?)")
+		q := "%" + strings.ToLower(f.Search) + "%"
+		args = append(args, q, q)
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+	query := fmt.Sprintf(`
 		SELECT c.case_id, c.title, c.summary, c.service, c.severity, c.status, c.sop_id, c.sop_version, c.reporter,
 			c.created_at, c.updated_at, c.resolved_at, COALESCE(s.slug,''), COALESCE(s.title,'')
 		FROM cases c
 		LEFT JOIN sop s ON s.id = c.sop_id
+		%s
 		ORDER BY c.created_at DESC
-		LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, q, limit)
+		LIMIT ? OFFSET ?`, where)
+	args = append(args, f.Limit, offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -428,15 +457,6 @@ func (s *Store) UpdateStep(ctx context.Context, caseID string, stepID int64, don
 	if evidenceURL != nil {
 		st.EvidenceURL = *evidenceURL
 	}
-	if doneBy != nil {
-		st.DoneBy = *doneBy
-	}
-	if notes != nil {
-		st.Notes = *notes
-	}
-	if evidenceURL != nil {
-		st.EvidenceURL = *evidenceURL
-	}
 	nowStr := time.Now().UTC().Format(time.RFC3339)
 	var doneStr any
 	if done != nil {
@@ -452,7 +472,7 @@ func (s *Store) UpdateStep(ctx context.Context, caseID string, stepID int64, don
 	}
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE case_step SET done_at = ?, done_by = ?, notes = ?, evidence_url = ? WHERE id = ? AND case_id = ?`,
-		doneStr, nullIfEmpty(st.DoneBy), st.Notes, st.EvidenceURL, stepID, caseID)
+		doneStr, nullIfEmpty(st.DoneBy), nullIfEmpty(st.Notes), nullIfEmpty(st.EvidenceURL), stepID, caseID)
 	return err
 }
 
@@ -461,6 +481,67 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// CreateSOP inserts a new SOP definition.
+func (s *Store) CreateSOP(ctx context.Context, slug, title, owner, stepsJSON string) (*SOP, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO sop (slug, title, version, owner, steps_json, created_at) VALUES (?, ?, 1, ?, ?, ?)`,
+		slug, title, nullIfEmpty(owner), stepsJSON, now)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return s.GetSOPByID(ctx, id)
+}
+
+// UpdateSOP updates an existing SOP and bumps its version.
+func (s *Store) UpdateSOP(ctx context.Context, slug, title, owner, stepsJSON string) (*SOP, error) {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sop SET title = ?, owner = ?, steps_json = ?, version = version + 1 WHERE slug = ?`,
+		title, nullIfEmpty(owner), stepsJSON, slug)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSOPBySlug(ctx, slug)
+}
+
+// DeleteSOP removes an SOP by slug.
+func (s *Store) DeleteSOP(ctx context.Context, slug string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sop WHERE slug = ?`, slug)
+	return err
+}
+
+// LogAudit records an audit event for a case.
+func (s *Store) LogAudit(ctx context.Context, caseID, actor, action, detail string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO case_audit (case_id, actor, action, detail, created_at) VALUES (?, ?, ?, ?, ?)`,
+		caseID, nullIfEmpty(actor), action, nullIfEmpty(detail), now)
+	return err
+}
+
+// ListAudit returns audit events for a case, newest first.
+func (s *Store) ListAudit(ctx context.Context, caseID string) ([]CaseAudit, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, case_id, COALESCE(actor,''), action, COALESCE(detail,''), created_at
+		 FROM case_audit WHERE case_id = ? ORDER BY id DESC`, caseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CaseAudit
+	for rows.Next() {
+		var a CaseAudit
+		var created string
+		if err := rows.Scan(&a.ID, &a.CaseID, &a.Actor, &a.Action, &a.Detail, &created); err != nil {
+			return nil, err
+		}
+		a.CreatedAt = parseTime(created)
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // ListAttachments for a case.

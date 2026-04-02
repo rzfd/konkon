@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rzfd/metatech/konkon/internal/render"
@@ -20,11 +21,60 @@ import (
 	"github.com/rzfd/metatech/konkon/internal/validate"
 )
 
+// ── Rate limiter ────────────────────────────────────────────────────────────
+
+type rlClient struct {
+	count   int
+	resetAt time.Time
+}
+
+type rateLimiter struct {
+	mu      sync.Mutex
+	clients map[string]*rlClient
+}
+
+func newRateLimiter() *rateLimiter {
+	rl := &rateLimiter{clients: make(map[string]*rlClient)}
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		for range t.C {
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, c := range rl.clients {
+				if now.After(c.resetAt) {
+					delete(rl.clients, ip)
+				}
+			}
+			rl.mu.Unlock()
+		}
+	}()
+	return rl
+}
+
+func (rl *rateLimiter) allow(ip string, limit int, window time.Duration) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	c, ok := rl.clients[ip]
+	if !ok || now.After(c.resetAt) {
+		rl.clients[ip] = &rlClient{count: 1, resetAt: now.Add(window)}
+		return true
+	}
+	if c.count >= limit {
+		return false
+	}
+	c.count++
+	return true
+}
+
+// ── Server ──────────────────────────────────────────────────────────────────
+
 // Server wires HTTP routes to the store.
 type Server struct {
 	log        *slog.Logger
 	store      *store.Store
 	uploadRoot string
+	rl         *rateLimiter
 }
 
 // New creates an API server.
@@ -32,22 +82,49 @@ func New(logger *slog.Logger, st *store.Store, uploadRoot string) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{log: logger, store: st, uploadRoot: uploadRoot}
+	return &Server{log: logger, store: st, uploadRoot: uploadRoot, rl: newRateLimiter()}
+}
+
+// limited wraps a handler with IP-based rate limiting (60 req/min).
+func (s *Server) limited(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			ip = strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
+		if !s.rl.allow(ip, 60, time.Minute) {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		h(w, r)
+	}
 }
 
 // Register attaches routes to mux (Go 1.22+ patterns).
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", s.handleHealth)
+
+	// SOP
 	mux.HandleFunc("GET /api/sops", s.handleListSOPs)
+	mux.HandleFunc("GET /api/sops/{slug}", s.handleGetSOP)
+	mux.HandleFunc("POST /api/sops", s.limited(s.handleCreateSOP))
+	mux.HandleFunc("PATCH /api/sops/{slug}", s.limited(s.handleUpdateSOP))
+	mux.HandleFunc("DELETE /api/sops/{slug}", s.limited(s.handleDeleteSOP))
+
+	// Cases
 	mux.HandleFunc("GET /api/cases", s.handleListCases)
-	mux.HandleFunc("POST /api/cases", s.handleCreateCase)
+	mux.HandleFunc("POST /api/cases", s.limited(s.handleCreateCase))
 	mux.HandleFunc("GET /api/cases/{id}", s.handleGetCase)
 	mux.HandleFunc("GET /api/cases/{id}/steps", s.handleListSteps)
-	mux.HandleFunc("PATCH /api/cases/{id}/sop", s.handlePatchSOP)
-	mux.HandleFunc("PATCH /api/cases/{caseId}/steps/{stepId}", s.handlePatchStep)
-	mux.HandleFunc("POST /api/cases/{id}/close", s.handleCloseCase)
+	mux.HandleFunc("PATCH /api/cases/{id}/sop", s.limited(s.handlePatchSOP))
+	mux.HandleFunc("PATCH /api/cases/{caseId}/steps/{stepId}", s.limited(s.handlePatchStep))
+	mux.HandleFunc("POST /api/cases/{id}/close", s.limited(s.handleCloseCase))
 	mux.HandleFunc("GET /api/cases/{id}/summary", s.handleSummary)
 	mux.HandleFunc("GET /api/cases/{id}/attachments", s.handleListAttachments)
+	mux.HandleFunc("GET /api/cases/{id}/audit", s.handleListAudit)
 	mux.HandleFunc("GET /api/cases/{caseId}/attachments/{attId}/raw", s.handleAttachmentRaw)
 }
 
@@ -56,11 +133,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
+// ── SOP handlers ────────────────────────────────────────────────────────────
+
 func (s *Server) handleListSOPs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	ctx := r.Context()
 	list, err := s.store.ListSOPs(ctx)
 	if err != nil {
@@ -82,13 +157,128 @@ func (s *Server) handleListSOPs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleListCases(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+func (s *Server) handleGetSOP(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	ctx := r.Context()
+	st, err := s.store.GetSOPBySlug(ctx, slug)
+	if err != nil || st == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	defs, _ := store.ParseSOPSteps(st.StepsJSON)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":         st.ID,
+		"slug":       st.Slug,
+		"title":      st.Title,
+		"version":    st.Version,
+		"owner":      st.Owner,
+		"steps_json": st.StepsJSON,
+		"steps":      defs,
+	})
+}
+
+type sopBody struct {
+	Slug  string             `json:"slug"`
+	Title string             `json:"title"`
+	Owner string             `json:"owner"`
+	Steps []store.SOPStepDef `json:"steps"`
+}
+
+func (s *Server) handleCreateSOP(w http.ResponseWriter, r *http.Request) {
+	var body sopBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	body.Slug = strings.TrimSpace(body.Slug)
+	body.Title = strings.TrimSpace(body.Title)
+	if body.Slug == "" || body.Title == "" {
+		http.Error(w, "slug dan title wajib diisi", http.StatusBadRequest)
+		return
+	}
+	if len(body.Steps) == 0 {
+		http.Error(w, "minimal satu langkah diperlukan", http.StatusBadRequest)
+		return
+	}
+	stepsJSON, err := json.Marshal(body.Steps)
+	if err != nil {
+		http.Error(w, "invalid steps", http.StatusBadRequest)
 		return
 	}
 	ctx := r.Context()
-	list, err := s.store.ListCases(ctx, 200)
+	st, err := s.store.CreateSOP(ctx, body.Slug, body.Title, body.Owner, string(stepsJSON))
+	if err != nil {
+		s.log.Error("create sop", "err", err)
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, "slug sudah digunakan", http.StatusConflict)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"slug": st.Slug, "title": st.Title, "version": st.Version})
+}
+
+func (s *Server) handleUpdateSOP(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	var body sopBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	body.Title = strings.TrimSpace(body.Title)
+	if body.Title == "" {
+		http.Error(w, "title wajib diisi", http.StatusBadRequest)
+		return
+	}
+	if len(body.Steps) == 0 {
+		http.Error(w, "minimal satu langkah diperlukan", http.StatusBadRequest)
+		return
+	}
+	stepsJSON, err := json.Marshal(body.Steps)
+	if err != nil {
+		http.Error(w, "invalid steps", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	st, err := s.store.UpdateSOP(ctx, slug, body.Title, body.Owner, string(stepsJSON))
+	if err != nil || st == nil {
+		s.log.Error("update sop", "err", err)
+		http.Error(w, "not found or internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"slug": st.Slug, "title": st.Title, "version": st.Version})
+}
+
+func (s *Server) handleDeleteSOP(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	ctx := r.Context()
+	if err := s.store.DeleteSOP(ctx, slug); err != nil {
+		s.log.Error("delete sop", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Case handlers ───────────────────────────────────────────────────────────
+
+func (s *Server) handleListCases(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := store.CaseFilter{
+		Status:   q.Get("status"),
+		Severity: q.Get("severity"),
+		Service:  q.Get("service"),
+		Search:   q.Get("search"),
+	}
+	if p, err := strconv.Atoi(q.Get("page")); err == nil && p > 0 {
+		f.Page = p
+	}
+	if l, err := strconv.Atoi(q.Get("limit")); err == nil && l > 0 && l <= 200 {
+		f.Limit = l
+	}
+	ctx := r.Context()
+	list, err := s.store.ListCases(ctx, f)
 	if err != nil {
 		s.log.Error("list cases", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -98,10 +288,6 @@ func (s *Server) handleListCases(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetCase(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	ctx := r.Context()
 	c, err := s.store.GetCase(ctx, id)
@@ -113,10 +299,6 @@ func (s *Server) handleGetCase(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListSteps(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	ctx := r.Context()
 	steps, err := s.store.ListSteps(ctx, id)
@@ -129,10 +311,6 @@ func (s *Server) handleListSteps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateCase(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	ctx := r.Context()
 	const maxMem = 32 << 20
 	if err := r.ParseMultipartForm(maxMem); err != nil {
@@ -208,12 +386,18 @@ func (s *Server) handleCreateCase(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// audit
+	detail := fmt.Sprintf("service=%s severity=%s reporter=%s", svc, sev, reporter)
+	_ = s.store.LogAudit(ctx, caseID, reporter, "case_created", detail)
+
+	var screenshotWarning string
 	file, hdr, err := r.FormFile("screenshot")
 	if err == nil {
 		defer file.Close()
 		dir := filepath.Join(s.uploadRoot, caseID)
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			s.log.Error("mkdir upload", "err", err)
+			screenshotWarning = "gagal menyimpan screenshot (mkdir)"
 		} else {
 			safe := filepath.Base(hdr.Filename)
 			if safe == "." || safe == "/" {
@@ -223,11 +407,13 @@ func (s *Server) handleCreateCase(w http.ResponseWriter, r *http.Request) {
 			dst, err := os.Create(dest)
 			if err != nil {
 				s.log.Error("create upload", "err", err)
+				screenshotWarning = "gagal menyimpan screenshot (create)"
 			} else {
 				_, copyErr := io.Copy(dst, file)
 				_ = dst.Close()
 				if copyErr != nil {
 					s.log.Error("copy upload", "err", copyErr)
+					screenshotWarning = "gagal menyimpan screenshot (copy)"
 				} else {
 					rel, _ := filepath.Rel(s.uploadRoot, dest)
 					_ = s.store.AddAttachment(ctx, store.CaseAttachment{
@@ -246,7 +432,11 @@ func (s *Server) handleCreateCase(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]any{"case_id": caseID})
 		return
 	}
-	writeJSON(w, http.StatusCreated, caseToJSON(*out))
+	resp := caseToJSON(*out)
+	if screenshotWarning != "" {
+		resp["screenshot_warning"] = screenshotWarning
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 type patchSOPBody struct {
@@ -254,10 +444,6 @@ type patchSOPBody struct {
 }
 
 func (s *Server) handlePatchSOP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	var body patchSOPBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Slug) == "" {
@@ -291,6 +477,7 @@ func (s *Server) handlePatchSOP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	_ = s.store.LogAudit(ctx, id, "", "sop_assigned", fmt.Sprintf("sop=%s v%d", st.Slug, v))
 	c, err := s.store.GetCase(ctx, id)
 	if err != nil || c == nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -300,17 +487,13 @@ func (s *Server) handlePatchSOP(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchStepBody struct {
-	Done         *bool   `json:"done"`
-	DoneBy       *string `json:"done_by"`
-	Notes        *string `json:"notes"`
-	EvidenceURL  *string `json:"evidence_url"`
+	Done        *bool   `json:"done"`
+	DoneBy      *string `json:"done_by"`
+	Notes       *string `json:"notes"`
+	EvidenceURL *string `json:"evidence_url"`
 }
 
 func (s *Server) handlePatchStep(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	caseID := r.PathValue("caseId")
 	sidStr := r.PathValue("stepId")
 	stepID, err := strconv.ParseInt(sidStr, 10, 64)
@@ -333,15 +516,28 @@ func (s *Server) handlePatchStep(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	steps, _ := s.store.ListSteps(ctx, caseID)
+	// audit
+	if body.Done != nil {
+		action := "step_undone"
+		if *body.Done {
+			action = "step_done"
+		}
+		by := ""
+		if body.DoneBy != nil {
+			by = *body.DoneBy
+		}
+		_ = s.store.LogAudit(ctx, caseID, by, action, fmt.Sprintf("step_id=%d", stepID))
+	}
+	steps, err := s.store.ListSteps(ctx, caseID)
+	if err != nil {
+		s.log.Error("list steps after update", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, http.StatusOK, stepsToJSON(steps))
 }
 
 func (s *Server) handleCloseCase(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	ctx := r.Context()
 	c, err := s.store.GetCase(ctx, id)
@@ -364,15 +560,34 @@ func (s *Server) handleCloseCase(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	_ = s.store.LogAudit(ctx, id, "", "case_closed", "")
 	c2, _ := s.store.GetCase(ctx, id)
 	writeJSON(w, http.StatusOK, caseToJSON(*c2))
 }
 
-func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ctx := r.Context()
+	events, err := s.store.ListAudit(ctx, id)
+	if err != nil {
+		s.log.Error("list audit", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	out := make([]map[string]any, 0, len(events))
+	for _, e := range events {
+		out = append(out, map[string]any{
+			"id":         e.ID,
+			"actor":      e.Actor,
+			"action":     e.Action,
+			"detail":     e.Detail,
+			"created_at": e.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ctx := r.Context()
 	c, err := s.store.GetCase(ctx, id)
@@ -396,10 +611,6 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListAttachments(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	ctx := r.Context()
 	list, err := s.store.ListAttachments(ctx, id)
@@ -420,10 +631,6 @@ func (s *Server) handleListAttachments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAttachmentRaw(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	caseID := r.PathValue("caseId")
 	attStr := r.PathValue("attId")
 	attID, err := strconv.ParseInt(attStr, 10, 64)
@@ -457,6 +664,8 @@ func (s *Server) handleAttachmentRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	http.ServeFile(w, r, full)
 }
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

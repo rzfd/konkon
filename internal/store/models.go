@@ -66,6 +66,26 @@ type SOPRule struct {
 
 // SOPStepDef is one step inside sop.steps_json.
 type SOPStepDef struct {
-	Title             string `json:"title"`
-	RequiresEvidence  bool   `json:"requires_evidence"`
+	Title            string `json:"title"`
+	RequiresEvidence bool   `json:"requires_evidence"`
+}
+
+// CaseAudit records an event on a case.
+type CaseAudit struct {
+	ID        int64
+	CaseID    string
+	Actor     string
+	Action    string
+	Detail    string
+	CreatedAt time.Time
+}
+
+// CaseFilter holds optional filters and pagination for ListCases.
+type CaseFilter struct {
+	Status   string
+	Severity string
+	Service  string
+	Search   string
+	Page     int
+	Limit    int
 }
