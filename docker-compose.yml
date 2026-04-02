@@ -1,4 +1,19 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: konkon
+      POSTGRES_PASSWORD: konkon
+      POSTGRES_DB: konkon
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U konkon -d konkon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   konkon:
     build:
       context: .
@@ -9,9 +24,14 @@ services:
     environment:
       KONKON_LISTEN: ":8080"
       KONKON_DATA_DIR: /data
+      KONKON_DB_DRIVER: postgres
+      KONKON_POSTGRES_DSN: postgres://konkon:konkon@postgres:5432/konkon?sslmode=disable
     volumes:
       - konkon-data:/data
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 15s
@@ -21,3 +41,4 @@ services:
 
 volumes:
   konkon-data:
+  postgres-data:

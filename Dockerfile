@@ -1,5 +1,5 @@
 # Build static binary (modernc.org/sqlite is pure Go; CGO not required).
-FROM golang:1.22-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./

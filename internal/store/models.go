@@ -27,16 +27,18 @@ type CaseStep struct {
 	StepNo           int
 	Title            string
 	RequiresEvidence bool
+	Optional         bool
 	DoneAt           *time.Time
 	DoneBy           string
 	Notes            string
 	EvidenceURL      string
 }
 
-// CaseAttachment is an uploaded file linked to a case.
+// CaseAttachment is an uploaded file linked to a case (or step).
 type CaseAttachment struct {
 	ID           int64
 	CaseID       string
+	StepID       *int64
 	Kind         string
 	FilePath     string
 	OriginalName string
@@ -68,6 +70,7 @@ type SOPRule struct {
 type SOPStepDef struct {
 	Title            string `json:"title"`
 	RequiresEvidence bool   `json:"requires_evidence"`
+	Optional         bool   `json:"optional"`
 }
 
 // CaseAudit records an event on a case.

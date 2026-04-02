@@ -355,6 +355,16 @@ async function renderCase(id) {
       const borderCls = done ? "border-[#3ecf8e]/20" : "border-[#2a3545]";
       const bgCls     = done ? "bg-[#3ecf8e]/5" : "bg-[#0f1419]/40";
       const circleCls = done ? "bg-[#3ecf8e]/20 text-[#3ecf8e]" : "bg-[#2a3545] text-[#8b98a8]";
+      const badges = [
+        st.requires_evidence ? `<span class="flex-none text-[10px] font-bold uppercase tracking-wide text-[#f0c14b] bg-[#f0c14b]/10 border border-[#f0c14b]/20 px-1.5 py-0.5 rounded">bukti wajib</span>` : "",
+        st.optional ? `<span class="flex-none text-[10px] font-bold uppercase tracking-wide text-[#8b98a8] bg-[#8b98a8]/10 border border-[#8b98a8]/20 px-1.5 py-0.5 rounded">opsional</span>` : "",
+      ].filter(Boolean).join("");
+      const uploadedImgs = (st.attachments || []).map(a =>
+        `<div class="mt-2">
+           <p class="text-[10px] text-[#8b98a8] mb-1">${esc(a.original_name)}</p>
+           <img src="${esc(a.url)}" class="max-w-full rounded-lg border border-[#2a3545]" style="max-height:200px;object-fit:contain" />
+         </div>`
+      ).join("");
       return `<li data-id="${st.id}" data-req-ev="${st.requires_evidence}"
           class="flex gap-4 p-4 rounded-xl border ${borderCls} ${bgCls} mb-3 last:mb-0">
           <!-- Circle -->
@@ -367,7 +377,7 @@ async function renderCase(id) {
           <div class="flex-1 min-w-0">
             <div class="flex items-start justify-between gap-2 mb-1">
               <span class="text-sm font-medium text-[#e7ecf3]">${esc(st.title)}</span>
-              ${st.requires_evidence ? `<span class="flex-none text-[10px] font-bold uppercase tracking-wide text-[#f0c14b] bg-[#f0c14b]/10 border border-[#f0c14b]/20 px-1.5 py-0.5 rounded">bukti wajib</span>` : ""}
+              <div class="flex gap-1 flex-wrap justify-end">${badges}</div>
             </div>
             <p class="text-xs text-[#8b98a8] mb-3">${done ? `Selesai ${esc(st.done_at?.slice(0,16).replace("T"," "))} · ${esc(st.done_by || "")}` : "Belum selesai"}</p>
 
@@ -388,6 +398,14 @@ async function renderCase(id) {
                   <input type="text" class="who ${IC} text-xs" placeholder="nama / @handle" value="${esc(st.done_by || "")}" />
                 </div>
               </div>
+              <!-- Upload bukti gambar -->
+              <div>
+                <label class="${LB}">Upload Bukti (JPG/PNG)</label>
+                <input type="file" accept="image/jpeg,image/png,image/gif" class="step-upload-file hidden" />
+                <button type="button" class="step-upload-btn ${BtnGhost} text-xs">+ Upload Gambar</button>
+                <div class="step-upload-progress text-xs text-[#8b98a8] mt-1 hidden">Mengunggah…</div>
+              </div>
+              ${uploadedImgs ? `<div class="step-imgs space-y-2">${uploadedImgs}</div>` : `<div class="step-imgs space-y-2"></div>`}
               <div class="flex gap-2 pt-1">
                 <button type="button" class="save-step ${BtnSm}" data-done="1">✓ Tandai selesai</button>
                 <button type="button" class="save-step ${BtnGhost}" data-done="0">Batal selesai</button>
@@ -429,6 +447,7 @@ async function renderCase(id) {
           <div class="flex gap-2 shrink-0">
             <a class="${BtnSm} no-underline" href="/api/cases/${encodeURIComponent(id)}/summary?format=md" target="_blank" rel="noopener">MD</a>
             <a class="${BtnSm} no-underline" href="/api/cases/${encodeURIComponent(id)}/summary?format=html" target="_blank" rel="noopener">HTML</a>
+            <a class="${BtnSm} no-underline" href="/api/cases/${encodeURIComponent(id)}/summary?format=pdf" target="_blank" rel="noopener">PDF</a>
           </div>
         </div>
         ${c.summary ? `<p class="text-sm text-[#8b98a8] mt-3 mb-0">${esc(c.summary)}</p>` : ""}
@@ -496,6 +515,35 @@ async function renderCase(id) {
           await renderCase(id);
         } catch (e) {
           alert(e.body?.errors?.join?.("\n") || e.message);
+        }
+      });
+    });
+
+    app.querySelectorAll(".step-upload-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        btn.closest("li").querySelector(".step-upload-file").click();
+      });
+    });
+
+    app.querySelectorAll(".step-upload-file").forEach((inp) => {
+      inp.addEventListener("change", async () => {
+        if (!inp.files?.length) return;
+        const li       = inp.closest("li");
+        const sid      = li.getAttribute("data-id");
+        const progress = li.querySelector(".step-upload-progress");
+        progress.classList.remove("hidden");
+        const form = new FormData();
+        form.append("file", inp.files[0]);
+        try {
+          await fetch(`/api/cases/${encodeURIComponent(id)}/steps/${sid}/attachment`, {
+            method: "POST", body: form,
+          });
+          await renderCase(id);
+        } catch (e) {
+          alert(e.message || "Gagal upload");
+        } finally {
+          progress.classList.add("hidden");
+          inp.value = "";
         }
       });
     });

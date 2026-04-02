@@ -71,18 +71,19 @@ func (rl *rateLimiter) allow(ip string, limit int, window time.Duration) bool {
 
 // Server wires HTTP routes to the store.
 type Server struct {
-	log        *slog.Logger
-	store      *store.Store
-	uploadRoot string
-	rl         *rateLimiter
+	log          *slog.Logger
+	store        *store.Store
+	uploadRoot   string
+	anthropicKey string
+	rl           *rateLimiter
 }
 
 // New creates an API server.
-func New(logger *slog.Logger, st *store.Store, uploadRoot string) *Server {
+func New(logger *slog.Logger, st *store.Store, uploadRoot string, anthropicKey string) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{log: logger, store: st, uploadRoot: uploadRoot, rl: newRateLimiter()}
+	return &Server{log: logger, store: st, uploadRoot: uploadRoot, anthropicKey: anthropicKey, rl: newRateLimiter()}
 }
 
 // limited wraps a handler with IP-based rate limiting (60 req/min).
@@ -123,9 +124,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/cases/{caseId}/steps/{stepId}", s.limited(s.handlePatchStep))
 	mux.HandleFunc("POST /api/cases/{id}/close", s.limited(s.handleCloseCase))
 	mux.HandleFunc("GET /api/cases/{id}/summary", s.handleSummary)
+	mux.HandleFunc("GET /api/cases/{id}/report", s.handleFinalReport)
 	mux.HandleFunc("GET /api/cases/{id}/attachments", s.handleListAttachments)
 	mux.HandleFunc("GET /api/cases/{id}/audit", s.handleListAudit)
 	mux.HandleFunc("GET /api/cases/{caseId}/attachments/{attId}/raw", s.handleAttachmentRaw)
+	mux.HandleFunc("POST /api/cases/{id}/steps/{stepId}/attachment", s.limited(s.handleUploadStepAttachment))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +310,8 @@ func (s *Server) handleListSteps(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, stepsToJSON(steps))
+	stepAtts, _ := s.store.ListStepAttachmentsForCase(ctx, id)
+	writeJSON(w, http.StatusOK, stepsWithAttachmentsToJSON(steps, stepAtts, id))
 }
 
 func (s *Server) handleCreateCase(w http.ResponseWriter, r *http.Request) {
@@ -534,7 +538,8 @@ func (s *Server) handlePatchStep(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, stepsToJSON(steps))
+	stepAtts, _ := s.store.ListStepAttachmentsForCase(ctx, caseID)
+	writeJSON(w, http.StatusOK, stepsWithAttachmentsToJSON(steps, stepAtts, caseID))
 }
 
 func (s *Server) handleCloseCase(w http.ResponseWriter, r *http.Request) {
@@ -601,13 +606,30 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
-	if format == "html" {
+	switch format {
+	case "html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(render.HTML(c, steps)))
-		return
+	case "pdf":
+		attachments, err := s.store.ListAttachments(ctx, id)
+		if err != nil {
+			s.log.Error("list attachments for pdf", "err", err)
+			attachments = nil
+		}
+		stepAtts, _ := s.store.ListStepAttachmentsForCase(ctx, id)
+		pdfBytes, err := render.PDF(c, steps, attachments, stepAtts, s.uploadRoot)
+		if err != nil {
+			s.log.Error("render pdf", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+id+`.pdf"`)
+		_, _ = w.Write(pdfBytes)
+	default:
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte(render.Markdown(c, steps)))
 	}
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	_, _ = w.Write([]byte(render.Markdown(c, steps)))
 }
 
 func (s *Server) handleListAttachments(w http.ResponseWriter, r *http.Request) {
@@ -639,17 +661,10 @@ func (s *Server) handleAttachmentRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	list, err := s.store.ListAttachments(ctx, caseID)
+	found, err := s.store.GetAttachmentByID(ctx, caseID, attID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
-	}
-	var found *store.CaseAttachment
-	for i := range list {
-		if list[i].ID == attID {
-			found = &list[i]
-			break
-		}
 	}
 	if found == nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -663,6 +678,71 @@ func (s *Server) handleAttachmentRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, full)
+}
+
+func (s *Server) handleUploadStepAttachment(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("id")
+	stepStr := r.PathValue("stepId")
+	stepID, err := strconv.ParseInt(stepStr, 10, 64)
+	if err != nil {
+		http.Error(w, "bad step id", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	// verify step belongs to case
+	st, err := s.store.GetStep(ctx, stepID, caseID)
+	if err != nil || st == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	const maxMem = 32 << 20
+	if err := r.ParseMultipartForm(maxMem); err != nil {
+		http.Error(w, "bad multipart form", http.StatusBadRequest)
+		return
+	}
+	file, hdr, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	dir := filepath.Join(s.uploadRoot, caseID, "steps", stepStr)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	safe := filepath.Base(hdr.Filename)
+	if safe == "." || safe == "/" {
+		safe = "upload"
+	}
+	dest := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), safe))
+	dst, err := os.Create(dest)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	_, copyErr := io.Copy(dst, file)
+	_ = dst.Close()
+	if copyErr != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	rel, _ := filepath.Rel(s.uploadRoot, dest)
+	att := store.CaseAttachment{
+		CaseID:       caseID,
+		StepID:       &stepID,
+		Kind:         "step_evidence",
+		FilePath:     rel,
+		OriginalName: hdr.Filename,
+	}
+	if err := s.store.AddAttachment(ctx, att); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// return updated step list so frontend can refresh
+	steps, _ := s.store.ListSteps(ctx, caseID)
+	stepAtts, _ := s.store.ListStepAttachmentsForCase(ctx, caseID)
+	writeJSON(w, http.StatusOK, stepsWithAttachmentsToJSON(steps, stepAtts, caseID))
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -709,7 +789,8 @@ func caseToJSON(c store.Case) map[string]any {
 	return m
 }
 
-func stepsToJSON(steps []store.CaseStep) []any {
+
+func stepsWithAttachmentsToJSON(steps []store.CaseStep, stepAtts map[int64][]store.CaseAttachment, caseID string) []any {
 	out := make([]any, 0, len(steps))
 	for _, st := range steps {
 		row := map[string]any{
@@ -717,6 +798,7 @@ func stepsToJSON(steps []store.CaseStep) []any {
 			"step_no":           st.StepNo,
 			"title":             st.Title,
 			"requires_evidence": st.RequiresEvidence,
+			"optional":          st.Optional,
 			"done_by":           st.DoneBy,
 			"notes":             st.Notes,
 			"evidence_url":      st.EvidenceURL,
@@ -726,6 +808,18 @@ func stepsToJSON(steps []store.CaseStep) []any {
 		} else {
 			row["done_at"] = nil
 		}
+		// per-step attachments
+		atts := []map[string]any{}
+		if stepAtts != nil {
+			for _, a := range stepAtts[st.ID] {
+				atts = append(atts, map[string]any{
+					"id":            a.ID,
+					"original_name": a.OriginalName,
+					"url":           fmt.Sprintf("/api/cases/%s/attachments/%d/raw", caseID, a.ID),
+				})
+			}
+		}
+		row["attachments"] = atts
 		out = append(out, row)
 	}
 	return out

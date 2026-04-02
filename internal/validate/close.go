@@ -23,11 +23,11 @@ func CloseCase(c *store.Case, steps []store.CaseStep) []string {
 		if strings.TrimSpace(st.EvidenceURL) != "" {
 			anyEvidence = true
 		}
-		if st.DoneAt == nil {
+		if st.DoneAt == nil && !st.Optional {
 			errs = append(errs, "langkah belum selesai: "+st.Title)
 			continue
 		}
-		if st.RequiresEvidence && strings.TrimSpace(st.EvidenceURL) == "" {
+		if st.RequiresEvidence && st.DoneAt != nil && strings.TrimSpace(st.EvidenceURL) == "" {
 			errs = append(errs, "bukti wajib untuk: "+st.Title)
 		}
 	}

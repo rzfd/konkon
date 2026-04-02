@@ -38,7 +38,7 @@ func main() {
 		log.Error("abs uploads", "err", err)
 		os.Exit(1)
 	}
-	st, err := store.Open(context.Background(), dbPath)
+	st, err := store.Open(context.Background(), cfg.DBDriver, dbPath, cfg.PostgresDSN)
 	if err != nil {
 		log.Error("open db", "err", err)
 		os.Exit(1)

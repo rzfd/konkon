@@ -15,10 +15,11 @@ import (
 // Store is the SQLite persistence layer.
 type Store struct {
 	db *sql.DB
+	rebind func(string) string
 }
 
 // Open opens the database, applies migrations, and returns a Store.
-func Open(ctx context.Context, dbPath string) (*Store, error) {
+func OpenSQLite(ctx context.Context, dbPath string) (*Store, error) {
 	dsn := "file:" + dbPath + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -46,11 +47,30 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
+func (s *Store) bind(query string) string {
+	if s == nil || s.rebind == nil {
+		return query
+	}
+	return s.rebind(query)
+}
+
+func (s *Store) queryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return s.db.QueryContext(ctx, s.bind(query), args...)
+}
+
+func (s *Store) queryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return s.db.QueryRowContext(ctx, s.bind(query), args...)
+}
+
+func (s *Store) execContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return s.db.ExecContext(ctx, s.bind(query), args...)
+}
+
 // NextCaseID returns the next OPS-YYYYMMDD-### id.
 func (s *Store) NextCaseID(ctx context.Context) (string, error) {
 	prefix := "OPS-" + time.Now().Format("20060102") + "-"
 	var n int
-	err := s.db.QueryRowContext(ctx,
+	err := s.queryRowContext(ctx,
 		`SELECT COUNT(*) FROM cases WHERE case_id LIKE ?`,
 		prefix+"%").Scan(&n)
 	if err != nil {
@@ -61,7 +81,7 @@ func (s *Store) NextCaseID(ctx context.Context) (string, error) {
 
 // ListSOPs returns all SOP definitions.
 func (s *Store) ListSOPs(ctx context.Context) ([]SOP, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.queryContext(ctx,
 		`SELECT id, slug, title, version, owner, steps_json, created_at FROM sop ORDER BY slug`)
 	if err != nil {
 		return nil, err
@@ -87,7 +107,7 @@ func (s *Store) ListSOPs(ctx context.Context) ([]SOP, error) {
 func (s *Store) GetSOPBySlug(ctx context.Context, slug string) (*SOP, error) {
 	var o SOP
 	var created string
-	err := s.db.QueryRowContext(ctx,
+	err := s.queryRowContext(ctx,
 		`SELECT id, slug, title, version, owner, steps_json, created_at FROM sop WHERE slug = ?`, slug).
 		Scan(&o.ID, &o.Slug, &o.Title, &o.Version, &o.Owner, &o.StepsJSON, &created)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -107,7 +127,7 @@ func (s *Store) GetSOPBySlug(ctx context.Context, slug string) (*SOP, error) {
 func (s *Store) GetSOPByID(ctx context.Context, id int64) (*SOP, error) {
 	var o SOP
 	var created string
-	err := s.db.QueryRowContext(ctx,
+	err := s.queryRowContext(ctx,
 		`SELECT id, slug, title, version, owner, steps_json, created_at FROM sop WHERE id = ?`, id).
 		Scan(&o.ID, &o.Slug, &o.Title, &o.Version, &o.Owner, &o.StepsJSON, &created)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -125,7 +145,7 @@ func (s *Store) GetSOPByID(ctx context.Context, id int64) (*SOP, error) {
 
 // ListSOPRules returns rules ordered by priority descending.
 func (s *Store) ListSOPRules(ctx context.Context) ([]SOPRule, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.queryContext(ctx,
 		`SELECT id, sop_id, priority, COALESCE(service,''), COALESCE(keyword,''), COALESCE(severity_min,'') FROM sop_rule ORDER BY priority DESC`)
 	if err != nil {
 		return nil, err
@@ -161,7 +181,7 @@ func (s *Store) CreateCase(ctx context.Context, c Case) error {
 	} else {
 		sv = nil
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execContext(ctx, `
 		INSERT INTO cases (case_id, title, summary, service, severity, status, sop_id, sop_version, reporter, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.CaseID, c.Title, c.Summary, c.Service, c.Severity, c.Status, sid, sv, c.Reporter, now, now)
@@ -171,7 +191,7 @@ func (s *Store) CreateCase(ctx context.Context, c Case) error {
 // UpdateCaseSOP sets SOP and version and status.
 func (s *Store) UpdateCaseSOP(ctx context.Context, caseID string, sopID int64, sopVersion int, status string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.execContext(ctx,
 		`UPDATE cases SET sop_id = ?, sop_version = ?, status = ?, updated_at = ? WHERE case_id = ?`,
 		sopID, sopVersion, status, now, caseID)
 	return err
@@ -184,7 +204,7 @@ func (s *Store) UpdateCaseStatus(ctx context.Context, caseID, status string, res
 	if resolved != nil {
 		r = resolved.UTC().Format(time.RFC3339)
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.execContext(ctx,
 		`UPDATE cases SET status = ?, updated_at = ?, resolved_at = COALESCE(?, resolved_at) WHERE case_id = ?`,
 		status, now, r, caseID)
 	return err
@@ -193,16 +213,20 @@ func (s *Store) UpdateCaseStatus(ctx context.Context, caseID, status string, res
 // AddAttachment records an uploaded file.
 func (s *Store) AddAttachment(ctx context.Context, a CaseAttachment) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO case_attachment (case_id, kind, file_path, original_name, created_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		a.CaseID, a.Kind, a.FilePath, a.OriginalName, now)
+	var stepID any
+	if a.StepID != nil {
+		stepID = *a.StepID
+	}
+	_, err := s.execContext(ctx, `
+		INSERT INTO case_attachment (case_id, step_id, kind, file_path, original_name, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		a.CaseID, stepID, a.Kind, a.FilePath, a.OriginalName, now)
 	return err
 }
 
 // DeleteStepsForCase removes all checklist rows for a case.
 func (s *Store) DeleteStepsForCase(ctx context.Context, caseID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM case_step WHERE case_id = ?`, caseID)
+	_, err := s.execContext(ctx, `DELETE FROM case_step WHERE case_id = ?`, caseID)
 	return err
 }
 
@@ -213,9 +237,13 @@ func (s *Store) InsertSteps(ctx context.Context, caseID string, defs []SOPStepDe
 		if d.RequiresEvidence {
 			req = 1
 		}
-		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO case_step (case_id, step_no, title, requires_evidence) VALUES (?, ?, ?, ?)`,
-			caseID, i+1, d.Title, req)
+		opt := 0
+		if d.Optional {
+			opt = 1
+		}
+		_, err := s.execContext(ctx, `
+			INSERT INTO case_step (case_id, step_no, title, requires_evidence, optional) VALUES (?, ?, ?, ?, ?)`,
+			caseID, i+1, d.Title, req, opt)
 		if err != nil {
 			return err
 		}
@@ -273,7 +301,7 @@ func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]Case, error) {
 		ORDER BY c.created_at DESC
 		LIMIT ? OFFSET ?`, where)
 	args = append(args, f.Limit, offset)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +311,7 @@ func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]Case, error) {
 
 // GetCase returns one case with joined sop labels.
 func (s *Store) GetCase(ctx context.Context, caseID string) (*Case, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRowContext(ctx, `
 		SELECT c.case_id, c.title, c.summary, c.service, c.severity, c.status, c.sop_id, c.sop_version, c.reporter,
 			c.created_at, c.updated_at, c.resolved_at, COALESCE(s.slug,''), COALESCE(s.title,'')
 		FROM cases c
@@ -373,8 +401,8 @@ func parseTime(s string) time.Time {
 
 // ListSteps returns steps for a case ordered by step_no.
 func (s *Store) ListSteps(ctx context.Context, caseID string) ([]CaseStep, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, case_id, step_no, title, requires_evidence, done_at, done_by, notes, evidence_url
+	rows, err := s.queryContext(ctx, `
+		SELECT id, case_id, step_no, title, requires_evidence, optional, done_at, done_by, notes, evidence_url
 		FROM case_step WHERE case_id = ? ORDER BY step_no`, caseID)
 	if err != nil {
 		return nil, err
@@ -383,12 +411,13 @@ func (s *Store) ListSteps(ctx context.Context, caseID string) ([]CaseStep, error
 	var out []CaseStep
 	for rows.Next() {
 		var st CaseStep
-		var req int
+		var req, opt int
 		var doneAt, doneBy, notes, evidence sql.NullString
-		if err := rows.Scan(&st.ID, &st.CaseID, &st.StepNo, &st.Title, &req, &doneAt, &doneBy, &notes, &evidence); err != nil {
+		if err := rows.Scan(&st.ID, &st.CaseID, &st.StepNo, &st.Title, &req, &opt, &doneAt, &doneBy, &notes, &evidence); err != nil {
 			return nil, err
 		}
 		st.RequiresEvidence = req != 0
+		st.Optional = opt != 0
 		st.DoneBy = nullStr(doneBy)
 		st.Notes = nullStr(notes)
 		st.EvidenceURL = nullStr(evidence)
@@ -411,12 +440,12 @@ func nullStr(ns sql.NullString) string {
 // GetStep returns a single step by id (scoped by caseID for safety).
 func (s *Store) GetStep(ctx context.Context, stepID int64, caseID string) (*CaseStep, error) {
 	var st CaseStep
-	var req int
+	var req, opt int
 	var doneAt, doneBy, notes, evidence sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, case_id, step_no, title, requires_evidence, done_at, done_by, notes, evidence_url
+	err := s.queryRowContext(ctx, `
+		SELECT id, case_id, step_no, title, requires_evidence, optional, done_at, done_by, notes, evidence_url
 		FROM case_step WHERE id = ? AND case_id = ?`, stepID, caseID).
-		Scan(&st.ID, &st.CaseID, &st.StepNo, &st.Title, &req, &doneAt, &doneBy, &notes, &evidence)
+		Scan(&st.ID, &st.CaseID, &st.StepNo, &st.Title, &req, &opt, &doneAt, &doneBy, &notes, &evidence)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -424,6 +453,7 @@ func (s *Store) GetStep(ctx context.Context, stepID int64, caseID string) (*Case
 		return nil, err
 	}
 	st.RequiresEvidence = req != 0
+	st.Optional = opt != 0
 	st.DoneBy = nullStr(doneBy)
 	st.Notes = nullStr(notes)
 	st.EvidenceURL = nullStr(evidence)
@@ -439,7 +469,7 @@ func (s *Store) UpdateStep(ctx context.Context, caseID string, stepID int64, don
 	var st CaseStep
 	var req int
 	var doneAt, doneByNS, notesNS, evidenceNS sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	err := s.queryRowContext(ctx, `
 		SELECT id, case_id, step_no, title, requires_evidence, done_at, done_by, notes, evidence_url FROM case_step WHERE id = ? AND case_id = ?`,
 		stepID, caseID).Scan(&st.ID, &st.CaseID, &st.StepNo, &st.Title, &req, &doneAt, &doneByNS, &notesNS, &evidenceNS)
 	if err != nil {
@@ -470,7 +500,7 @@ func (s *Store) UpdateStep(ctx context.Context, caseID string, stepID int64, don
 	} else {
 		doneStr = nil
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.execContext(ctx, `
 		UPDATE case_step SET done_at = ?, done_by = ?, notes = ?, evidence_url = ? WHERE id = ? AND case_id = ?`,
 		doneStr, nullIfEmpty(st.DoneBy), nullIfEmpty(st.Notes), nullIfEmpty(st.EvidenceURL), stepID, caseID)
 	return err
@@ -486,7 +516,7 @@ func nullIfEmpty(s string) any {
 // CreateSOP inserts a new SOP definition.
 func (s *Store) CreateSOP(ctx context.Context, slug, title, owner, stepsJSON string) (*SOP, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.execContext(ctx,
 		`INSERT INTO sop (slug, title, version, owner, steps_json, created_at) VALUES (?, ?, 1, ?, ?, ?)`,
 		slug, title, nullIfEmpty(owner), stepsJSON, now)
 	if err != nil {
@@ -498,7 +528,7 @@ func (s *Store) CreateSOP(ctx context.Context, slug, title, owner, stepsJSON str
 
 // UpdateSOP updates an existing SOP and bumps its version.
 func (s *Store) UpdateSOP(ctx context.Context, slug, title, owner, stepsJSON string) (*SOP, error) {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.execContext(ctx,
 		`UPDATE sop SET title = ?, owner = ?, steps_json = ?, version = version + 1 WHERE slug = ?`,
 		title, nullIfEmpty(owner), stepsJSON, slug)
 	if err != nil {
@@ -509,14 +539,14 @@ func (s *Store) UpdateSOP(ctx context.Context, slug, title, owner, stepsJSON str
 
 // DeleteSOP removes an SOP by slug.
 func (s *Store) DeleteSOP(ctx context.Context, slug string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sop WHERE slug = ?`, slug)
+	_, err := s.execContext(ctx, `DELETE FROM sop WHERE slug = ?`, slug)
 	return err
 }
 
 // LogAudit records an audit event for a case.
 func (s *Store) LogAudit(ctx context.Context, caseID, actor, action, detail string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.execContext(ctx,
 		`INSERT INTO case_audit (case_id, actor, action, detail, created_at) VALUES (?, ?, ?, ?, ?)`,
 		caseID, nullIfEmpty(actor), action, nullIfEmpty(detail), now)
 	return err
@@ -524,7 +554,7 @@ func (s *Store) LogAudit(ctx context.Context, caseID, actor, action, detail stri
 
 // ListAudit returns audit events for a case, newest first.
 func (s *Store) ListAudit(ctx context.Context, caseID string) ([]CaseAudit, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.queryContext(ctx,
 		`SELECT id, case_id, COALESCE(actor,''), action, COALESCE(detail,''), created_at
 		 FROM case_audit WHERE case_id = ? ORDER BY id DESC`, caseID)
 	if err != nil {
@@ -544,10 +574,11 @@ func (s *Store) ListAudit(ctx context.Context, caseID string) ([]CaseAudit, erro
 	return out, rows.Err()
 }
 
-// ListAttachments for a case.
+// ListAttachments returns case-level attachments (no step_id).
 func (s *Store) ListAttachments(ctx context.Context, caseID string) ([]CaseAttachment, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, case_id, kind, file_path, original_name, created_at FROM case_attachment WHERE case_id = ? ORDER BY id`, caseID)
+	rows, err := s.queryContext(ctx, `
+		SELECT id, case_id, kind, file_path, original_name, created_at
+		FROM case_attachment WHERE case_id = ? AND step_id IS NULL ORDER BY id`, caseID)
 	if err != nil {
 		return nil, err
 	}
@@ -563,4 +594,50 @@ func (s *Store) ListAttachments(ctx context.Context, caseID string) ([]CaseAttac
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListStepAttachmentsForCase returns all step-level attachments for a case, keyed by step_id.
+func (s *Store) ListStepAttachmentsForCase(ctx context.Context, caseID string) (map[int64][]CaseAttachment, error) {
+	rows, err := s.queryContext(ctx, `
+		SELECT id, case_id, step_id, kind, file_path, original_name, created_at
+		FROM case_attachment WHERE case_id = ? AND step_id IS NOT NULL ORDER BY id`, caseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64][]CaseAttachment)
+	for rows.Next() {
+		var a CaseAttachment
+		var stepID int64
+		var created string
+		if err := rows.Scan(&a.ID, &a.CaseID, &stepID, &a.Kind, &a.FilePath, &a.OriginalName, &created); err != nil {
+			return nil, err
+		}
+		a.StepID = &stepID
+		a.CreatedAt = parseTime(created)
+		out[stepID] = append(out[stepID], a)
+	}
+	return out, rows.Err()
+}
+
+// GetAttachmentByID returns any attachment by id scoped to a case.
+func (s *Store) GetAttachmentByID(ctx context.Context, caseID string, attID int64) (*CaseAttachment, error) {
+	var a CaseAttachment
+	var stepID sql.NullInt64
+	var created string
+	err := s.queryRowContext(ctx, `
+		SELECT id, case_id, step_id, kind, file_path, original_name, created_at
+		FROM case_attachment WHERE id = ? AND case_id = ?`, attID, caseID).
+		Scan(&a.ID, &a.CaseID, &stepID, &a.Kind, &a.FilePath, &a.OriginalName, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if stepID.Valid {
+		a.StepID = &stepID.Int64
+	}
+	a.CreatedAt = parseTime(created)
+	return &a, nil
 }
