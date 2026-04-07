@@ -79,11 +79,11 @@ func buildCaseText(c *store.Case, steps []store.CaseStep) string {
 }
 
 func aiFinalReport(ctx context.Context, c *store.Case, steps []store.CaseStep, apiKey string) (string, error) {
-	systemPrompt := `Anda adalah penulis laporan insiden teknis profesional untuk tim TechOps. Tugas Anda adalah membuat Final Report Insiden yang formal dan komprehensif berdasarkan data case yang diberikan.
+	systemPrompt := `Anda adalah penulis laporan insiden teknis profesional untuk tim TechOps. Tugas Anda adalah membuat Root Cause Analysis (RCA) / laporan insiden yang formal dan komprehensif berdasarkan data case yang diberikan.
 
 Format laporan HARUS mengikuti struktur berikut (dalam Bahasa Indonesia):
 
-# Final Report Insiden
+# Root Cause Analysis (RCA) — Laporan Insiden
 ## {CaseID} — {Judul Case}
 
 ### 1. Ringkasan Insiden
@@ -119,7 +119,7 @@ PENTING:
 - Gunakan catatan (Notes) dari setiap langkah sebagai bahan utama narasi
 - Jangan mengarang informasi yang tidak ada dalam data case
 - Gunakan format Markdown yang benar
-- Langsung mulai dengan "# Final Report Insiden", jangan tambahkan teks pengantar`
+- Langsung mulai dengan "# Root Cause Analysis (RCA) — Laporan Insiden", jangan tambahkan teks pengantar`
 
 	userMsg := fmt.Sprintf("Buatkan Final Report Insiden berdasarkan data case berikut:\n\n%s", buildCaseText(c, steps))
 
@@ -187,7 +187,7 @@ PENTING:
 func templateFinalReport(c *store.Case, steps []store.CaseStep) string {
 	var b strings.Builder
 
-	b.WriteString("# Final Report Insiden\n")
+	b.WriteString("# Root Cause Analysis (RCA) — Laporan Insiden\n")
 	b.WriteString(fmt.Sprintf("## %s — %s\n\n", c.CaseID, c.Title))
 
 	// 1. Ringkasan

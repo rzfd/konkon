@@ -46,7 +46,7 @@ func main() {
 	defer st.Close()
 
 	mux := http.NewServeMux()
-	api := httpapi.New(log, st, uploadPath)
+	api := httpapi.New(log, st, uploadPath, cfg.AnthropicAPIKey)
 	api.Register(mux)
 
 	sub, err := fs.Sub(webFS, "web")

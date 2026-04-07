@@ -632,6 +632,29 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleFinalReport(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ctx := r.Context()
+	c, err := s.store.GetCase(ctx, id)
+	if err != nil || c == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	steps, err := s.store.ListSteps(ctx, id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	report, err := render.FinalReport(ctx, c, steps, s.anthropicKey)
+	if err != nil {
+		s.log.Error("final report", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	_, _ = w.Write([]byte(report))
+}
+
 func (s *Server) handleListAttachments(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ctx := r.Context()

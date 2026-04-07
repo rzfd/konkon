@@ -11,18 +11,21 @@ import (
 	"github.com/rzfd/metatech/konkon/internal/store"
 )
 
-// colour palette
+// colour palette — high-contrast dark RCA layout (readable on screen & print)
 const (
-	headerBgR, headerBgG, headerBgB = 26, 32, 44    // dark navy
-	accentR, accentG, accentB       = 99, 179, 237   // sky blue
-	cardBgR, cardBgG, cardBgB       = 237, 242, 247  // light grey-blue
-	textDarkR, textDarkG, textDarkB = 26, 32, 44
-	textMidR, textMidG, textMidB    = 74, 85, 104
-	textLightR, textLightG, textLightB = 160, 174, 192
-	greenR, greenG, greenB          = 56, 161, 105
-	redR, redG, redB                = 229, 62, 62
-	orangeR, orangeG, orangeB       = 221, 107, 32
-	yellowR, yellowG, yellowB       = 202, 138, 4
+	pageBgR, pageBgG, pageBgB       = 10, 14, 20    // page fill
+	headerBgR, headerBgG, headerBgB = 18, 24, 34    // title banner
+	panelR, panelG, panelB          = 22, 30, 42    // metadata / summary panels
+	accentR, accentG, accentB     = 120, 200, 255 // brighter sky for contrast on dark
+	textBrightR, textBrightG, textBrightB = 248, 250, 252
+	textMidR, textMidG, textMidB    = 186, 198, 212
+	textDimR, textDimG, textDimB    = 130, 146, 165
+	stepZebraAR, stepZebraAG, stepZebraAB = 16, 22, 32
+	stepZebraBR, stepZebraBG, stepZebraBB = 24, 32, 46
+	greenR, greenG, greenB          = 72, 212, 140
+	redR, redG, redB                = 255, 90, 90
+	orangeR, orangeG, orangeB       = 255, 150, 60
+	yellowR, yellowG, yellowB       = 250, 204, 21
 	pageW                           = 210.0
 	marginL                         = 18.0
 	marginR                         = 18.0
@@ -38,12 +41,17 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 	// UTF-8 -> cp1252 translator (handles •, —, accented chars, etc.)
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 
+	pdf.SetHeaderFunc(func() {
+		pdf.SetFillColor(pageBgR, pageBgG, pageBgB)
+		pdf.Rect(0, 0, pageW, 297, "F")
+	})
+
 	// ── Footer on every page ─────────────────────────────────────────────────
 	pdf.SetFooterFunc(func() {
 		pdf.SetY(-14)
 		pdf.SetFont("Helvetica", "I", 7.5)
-		pdf.SetTextColor(textLightR, textLightG, textLightB)
-		pdf.SetDrawColor(textLightR, textLightG, textLightB)
+		pdf.SetTextColor(textDimR, textDimG, textDimB)
+		pdf.SetDrawColor(textDimR, textDimG, textDimB)
 		pdf.Line(marginL, pdf.GetY()-1, pageW-marginR, pdf.GetY()-1)
 		pdf.CellFormat(contentW/2, 6,
 			tr(fmt.Sprintf("Diekspor %s", time.Now().UTC().Format("2006-01-02 15:04 UTC"))),
@@ -65,11 +73,11 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 	pdf.SetFillColor(accentR, accentG, accentB)
 	pdf.Rect(0, 38, pageW, 4, "F")
 
-	// "RINGKASAN CASE" label
+	// document type (RCA)
 	pdf.SetXY(marginL, 8)
-	pdf.SetFont("Helvetica", "", 7.5)
+	pdf.SetFont("Helvetica", "B", 7.5)
 	pdf.SetTextColor(accentR, accentG, accentB)
-	pdf.CellFormat(contentW, 5, "KONKON TECHOPS  |  RINGKASAN CASE", "", 1, "L", false, 0, "")
+	pdf.CellFormat(contentW, 5, "KONKON TECHOPS  |  ROOT CAUSE ANALYSIS (RCA)", "", 1, "L", false, 0, "")
 
 	// Case ID
 	pdf.SetX(marginL)
@@ -105,7 +113,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 	// ════════════════════════════════════════════════════════════════════════
 	// METADATA CARD
 	// ════════════════════════════════════════════════════════════════════════
-	sectionHeader(pdf, "INFORMASI CASE")
+	sectionHeader(pdf, "INFORMASI INSIDEN")
 
 	// two-column grid
 	type kv struct{ k, v string }
@@ -130,9 +138,11 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 	rows := max(len(left), len(right))
 	cardY := pdf.GetY()
 
-	// card background
-	pdf.SetFillColor(cardBgR, cardBgG, cardBgB)
-	pdf.RoundedRect(marginL, cardY, contentW, float64(rows)*9+10, 2, "1234", "F")
+	// card background (dark panel)
+	pdf.SetFillColor(panelR, panelG, panelB)
+	pdf.SetDrawColor(accentR, accentG, accentB)
+	pdf.SetLineWidth(0.2)
+	pdf.RoundedRect(marginL, cardY, contentW, float64(rows)*9+10, 2, "1234", "FD")
 
 	for i := 0; i < rows; i++ {
 		rowY := cardY + 5 + float64(i)*9
@@ -183,16 +193,17 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 
 	// Summary block (if present)
 	if c.Summary != "" {
-		pdf.SetFillColor(255, 255, 255)
 		sy := pdf.GetY()
-		pdf.SetFillColor(cardBgR, cardBgG, cardBgB)
-		pdf.RoundedRect(marginL, sy, contentW, 0, 2, "1234", "") // outline only
+		pdf.SetFillColor(panelR, panelG, panelB)
+		pdf.SetDrawColor(accentR, accentG, accentB)
+		pdf.SetLineWidth(0.2)
+		pdf.RoundedRect(marginL, sy, contentW, 0, 2, "1234", "FD")
 		pdf.SetFont("Helvetica", "B", 8)
-		pdf.SetTextColor(textMidR, textMidG, textMidB)
+		pdf.SetTextColor(accentR, accentG, accentB)
 		pdf.SetXY(marginL+4, sy+4)
-		pdf.CellFormat(contentW-8, 5, "RINGKASAN", "", 1, "L", false, 0, "")
+		pdf.CellFormat(contentW-8, 5, "RINGKASAN EKSEKUTIF", "", 1, "L", false, 0, "")
 		pdf.SetFont("Helvetica", "", 9)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+		pdf.SetTextColor(textBrightR, textBrightG, textBrightB)
 		pdf.SetX(marginL + 4)
 		pdf.MultiCell(contentW-8, 5.5, tr(c.Summary), "", "L", false)
 		pdf.Ln(4)
@@ -201,7 +212,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 	// SOP info row
 	if c.SOPTitle != "" {
 		sy := pdf.GetY()
-		pdf.SetFillColor(232, 244, 253)
+		pdf.SetFillColor(18, 36, 54)
 		pdf.SetDrawColor(accentR, accentG, accentB)
 		pdf.RoundedRect(marginL, sy, contentW, 10, 2, "1234", "FD")
 		pdf.SetXY(marginL+4, sy+2.5)
@@ -209,7 +220,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 		pdf.SetTextColor(accentR, accentG, accentB)
 		pdf.CellFormat(22, 5, "SOP:", "", 0, "L", false, 0, "")
 		pdf.SetFont("Helvetica", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+		pdf.SetTextColor(textBrightR, textBrightG, textBrightB)
 		pdf.CellFormat(contentW-26, 5,
 			tr(fmt.Sprintf("%s  (v%d)  -  %s", c.SOPSlug, derefVer(c.SOPVersion), c.SOPTitle)),
 			"", 1, "L", false, 0, "")
@@ -220,7 +231,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 	// CHECKLIST
 	// ════════════════════════════════════════════════════════════════════════
 	if len(steps) > 0 {
-		sectionHeader(pdf, "TIMELINE CHECKLIST")
+		sectionHeader(pdf, "KRONOLOGI & CHECKLIST")
 
 		done := 0
 		for _, st := range steps {
@@ -230,7 +241,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 		}
 		// progress bar
 		barY := pdf.GetY()
-		pdf.SetFillColor(cardBgR, cardBgG, cardBgB)
+		pdf.SetFillColor(stepZebraBR, stepZebraBG, stepZebraBB)
 		pdf.Rect(marginL, barY, contentW, 5, "F")
 		pct := float64(done) / float64(len(steps))
 		pdf.SetFillColor(greenR, greenG, greenB)
@@ -263,9 +274,9 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 
 			// ── background fill ──────────────────────────────────────────
 			if i%2 == 0 {
-				pdf.SetFillColor(249, 250, 251)
+				pdf.SetFillColor(stepZebraAR, stepZebraAG, stepZebraAB)
 			} else {
-				pdf.SetFillColor(255, 255, 255)
+				pdf.SetFillColor(stepZebraBR, stepZebraBG, stepZebraBB)
 			}
 			pdf.Rect(marginL, ry, contentW, minH, "F")
 
@@ -273,7 +284,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 			if isDone {
 				pdf.SetFillColor(greenR, greenG, greenB)
 			} else {
-				pdf.SetFillColor(textLightR, textLightG, textLightB)
+				pdf.SetFillColor(textDimR, textDimG, textDimB)
 			}
 			pdf.Rect(marginL, ry, 3, minH, "F")
 
@@ -283,7 +294,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 			if isDone {
 				pdf.SetFillColor(greenR, greenG, greenB)
 			} else {
-				pdf.SetFillColor(textLightR, textLightG, textLightB)
+				pdf.SetFillColor(textDimR, textDimG, textDimB)
 			}
 			pdf.Circle(cx, cy, 3.5, "F")
 			pdf.SetFont("Helvetica", "B", 7)
@@ -297,7 +308,7 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 			pdf.SetXY(titleX, ry+2)
 			if isDone {
 				pdf.SetFont("Helvetica", "B", 9)
-				pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+				pdf.SetTextColor(textBrightR, textBrightG, textBrightB)
 			} else {
 				pdf.SetFont("Helvetica", "B", 9)
 				pdf.SetTextColor(textMidR, textMidG, textMidB)
@@ -400,7 +411,7 @@ func metaRow(pdf *fpdf.Fpdf, x, y, w float64, label, value string) {
 	pdf.SetTextColor(textMidR, textMidG, textMidB)
 	pdf.CellFormat(28, 4.5, strings.ToUpper(label), "", 0, "L", false, 0, "")
 	pdf.SetFont("Helvetica", "", 8.5)
-	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+	pdf.SetTextColor(textBrightR, textBrightG, textBrightB)
 	pdf.MultiCell(w-28, 4.5, value, "", "L", false)
 }
 
@@ -413,7 +424,7 @@ func drawBadge(pdf *fpdf.Fpdf, x *float64, y float64, label, value string, rgb [
 
 	// label part (dark)
 	pdf.SetFillColor(headerBgR+20, headerBgG+20, headerBgB+20)
-	pdf.SetTextColor(textLightR, textLightG, textLightB)
+	pdf.SetTextColor(textDimR, textDimG, textDimB)
 	pdf.SetXY(*x, y)
 	pdf.SetFont("Helvetica", "B", 7)
 	pdf.CellFormat(lw, 8, label, "", 0, "C", true, 0, "")

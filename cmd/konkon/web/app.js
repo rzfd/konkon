@@ -432,30 +432,34 @@ async function renderCase(id) {
       : `<p class="text-xs text-[#8b98a8]">Belum ada aktivitas.</p>`;
 
     app.innerHTML = `
-      <!-- Header -->
-      <div class="${Card}">
-        <a href="#/" class="inline-flex items-center gap-1 text-xs text-[#8b98a8] hover:text-[#e7ecf3] no-underline mb-4 transition-colors">← Kembali</a>
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <p class="text-xs font-mono text-[#8b98a8] mb-1">${esc(c.case_id)}</p>
-            <h1 class="text-lg font-bold text-[#e7ecf3] m-0 mb-2 leading-snug">${esc(c.title)}</h1>
-            <div class="flex items-center gap-2 flex-wrap">
+      <!-- RCA header (selaras PDF / HTML export) -->
+      <div class="mb-4">
+        <a href="#/" class="inline-flex items-center gap-1 text-xs text-[#8b98a8] hover:text-[#e7ecf3] no-underline mb-3 transition-colors">← Kembali</a>
+        <div class="rounded-xl border border-[#1e3a5f] bg-[#121a26] overflow-hidden relative">
+          <div class="absolute bottom-0 left-0 right-0 h-1 bg-[#78c8ff]"></div>
+          <div class="p-5 pb-6 pr-4 sm:pr-44">
+            <p class="text-[11px] font-bold uppercase tracking-[0.06em] text-[#78c8ff] m-0 mb-1.5">Konkon TechOps · Root Cause Analysis (RCA)</p>
+            <p class="text-sm font-mono font-bold text-[#78c8ff] m-0 mb-1">${esc(c.case_id)}</p>
+            <h1 class="text-xl font-extrabold text-[#f8fafc] m-0 mb-3 leading-snug">${esc(c.title)}</h1>
+            <div class="flex flex-wrap gap-2 items-center">
               ${badge(c.status)}
-              ${c.sop_slug ? `<span class="text-xs text-[#8b98a8]">SOP: <span class="font-mono text-[#8b98a8]">${esc(c.sop_slug)}</span>${c.sop_version != null ? ` <span class="text-[10px]">v${esc(c.sop_version)}</span>` : ""}</span>` : ""}
+              ${c.severity ? `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#3d8bfd]/15 text-[#93c5fd] border border-[#3d8bfd]/25">${esc(c.severity)}</span>` : ""}
+              ${c.service ? `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#2a3545] text-[#94a3b8] border border-[#334155]">${esc(c.service)}</span>` : ""}
+              ${c.sop_slug ? `<span class="text-xs text-[#8b98a8]">SOP: <span class="font-mono">${esc(c.sop_slug)}</span>${c.sop_version != null ? ` <span class="text-[10px]">v${esc(c.sop_version)}</span>` : ""}</span>` : ""}
             </div>
+            ${c.summary ? `<p class="text-sm text-[#cbd5e1] mt-4 mb-0 leading-relaxed border-t border-[#2a3545] pt-4"><span class="text-[11px] font-bold uppercase tracking-wider text-[#78c8ff] block mb-1.5">Ringkasan eksekutif</span>${esc(c.summary)}</p>` : ""}
           </div>
-          <div class="flex gap-2 shrink-0">
-            <a class="${BtnSm} no-underline" href="/api/cases/${encodeURIComponent(id)}/summary?format=md" target="_blank" rel="noopener">MD</a>
-            <a class="${BtnSm} no-underline" href="/api/cases/${encodeURIComponent(id)}/summary?format=html" target="_blank" rel="noopener">HTML</a>
-            <a class="${BtnSm} no-underline" href="/api/cases/${encodeURIComponent(id)}/summary?format=pdf" target="_blank" rel="noopener">PDF</a>
+          <div class="absolute top-4 right-4 flex flex-col sm:flex-row gap-2">
+            <a class="${BtnSm} no-underline text-center justify-center" href="/api/cases/${encodeURIComponent(id)}/summary?format=md" target="_blank" rel="noopener">MD</a>
+            <a class="${BtnSm} no-underline text-center justify-center" href="/api/cases/${encodeURIComponent(id)}/summary?format=html" target="_blank" rel="noopener">HTML</a>
+            <a class="${BtnSm} no-underline text-center justify-center" href="/api/cases/${encodeURIComponent(id)}/summary?format=pdf" target="_blank" rel="noopener">PDF</a>
           </div>
         </div>
-        ${c.summary ? `<p class="text-sm text-[#8b98a8] mt-3 mb-0">${esc(c.summary)}</p>` : ""}
       </div>
 
       <!-- Metadata -->
       <div class="${Card}">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] mb-4 m-0">Metadata</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] mb-4 m-0">Informasi insiden</h2>
         ${caseMetaHtml(c)}
       </div>
 
@@ -479,7 +483,7 @@ async function renderCase(id) {
       <!-- Checklist -->
       <div class="${Card}">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] m-0">Checklist</h2>
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] m-0">Kronologi & checklist</h2>
           ${steps?.length ? `<span class="text-xs text-[#8b98a8]">${steps.filter(s=>s.done_at).length}/${steps.length} selesai</span>` : ""}
         </div>
         <ol class="list-none p-0 m-0" id="steps">${stepItems || `<li class="text-sm text-[#8b98a8] py-4 text-center">Belum ada langkah — pilih SOP terlebih dahulu.</li>`}</ol>
