@@ -1,13 +1,13 @@
 :root {
-  --bg:     #0f1419;
-  --panel:  #1a2332;
+  --bg:     #0b1220;
+  --panel:  #121a26;
   --text:   #e7ecf3;
-  --muted:  #8b98a8;
-  --accent: #3d8bfd;
+  --muted:  #a9b4c4;
+  --accent: #60a5fa;
   --ok:     #3ecf8e;
   --warn:   #f0c14b;
   --err:    #f07178;
-  --border: #2a3545;
+  --border: #253041;
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
 }
 
@@ -32,7 +32,7 @@ body {
 .field-status { margin-left: 0.4rem; font-size: 0.85rem; font-weight: 600; }
 .field-status.ok    { color: var(--ok); }
 .field-status.warn  { color: var(--warn); }
-.field-status.empty { color: var(--muted); opacity: 0.5; }
+.field-status.empty { color: var(--muted); opacity: 0.6; }
 
 .form-checker {
   margin-top: 0.75rem;
@@ -42,14 +42,14 @@ body {
   font-weight: 500;
   border: 1px solid;
 }
-.form-checker.all-ok     { border-color: var(--ok);   background: rgba(62,207,142,0.07); color: var(--ok); }
-.form-checker.partial-ok { border-color: var(--accent);background: rgba(61,139,253,0.07); color: var(--accent); }
-.form-checker.has-warn   { border-color: var(--warn);  background: rgba(240,193,75,0.07);  color: var(--warn); }
+.form-checker.all-ok     { border-color: rgba(62,207,142,0.45); background: rgba(62,207,142,0.10); color: #5eead4; }
+.form-checker.partial-ok { border-color: rgba(96,165,250,0.45); background: rgba(96,165,250,0.10); color: #93c5fd; }
+.form-checker.has-warn   { border-color: rgba(240,193,75,0.45); background: rgba(240,193,75,0.10); color: #f0c14b; }
 
 /* Step checker */
 .step-ev-warn { font-size: 0.75rem; color: var(--warn); min-height: 1.1em; margin-top: 0.2rem; }
 
 .save-step.step-ready {
   background: var(--ok) !important;
-  color: #0f1419 !important;
+  color: #fff !important;
 }

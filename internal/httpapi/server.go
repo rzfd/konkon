@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,10 +15,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rzfd/metatech/konkon/internal/render"
 	"github.com/rzfd/metatech/konkon/internal/sop"
 	"github.com/rzfd/metatech/konkon/internal/store"
+	"github.com/rzfd/metatech/konkon/internal/tz"
 	"github.com/rzfd/metatech/konkon/internal/validate"
 )
 
@@ -124,10 +127,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/cases/{caseId}/steps/{stepId}", s.limited(s.handlePatchStep))
 	mux.HandleFunc("POST /api/cases/{id}/close", s.limited(s.handleCloseCase))
 	mux.HandleFunc("GET /api/cases/{id}/summary", s.handleSummary)
+	mux.HandleFunc("PATCH /api/cases/{id}/rca", s.limited(s.handlePatchRCA))
 	mux.HandleFunc("GET /api/cases/{id}/report", s.handleFinalReport)
 	mux.HandleFunc("GET /api/cases/{id}/attachments", s.handleListAttachments)
 	mux.HandleFunc("GET /api/cases/{id}/audit", s.handleListAudit)
 	mux.HandleFunc("GET /api/cases/{caseId}/attachments/{attId}/raw", s.handleAttachmentRaw)
+	mux.HandleFunc("DELETE /api/cases/{caseId}/attachments/{attId}", s.limited(s.handleDeleteAttachment))
 	mux.HandleFunc("POST /api/cases/{id}/steps/{stepId}/attachment", s.limited(s.handleUploadStepAttachment))
 }
 
@@ -395,37 +400,70 @@ func (s *Server) handleCreateCase(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.LogAudit(ctx, caseID, reporter, "case_created", detail)
 
 	var screenshotWarning string
-	file, hdr, err := r.FormFile("screenshot")
-	if err == nil {
-		defer file.Close()
-		dir := filepath.Join(s.uploadRoot, caseID)
+	var fileHeaders []*multipart.FileHeader
+	if r.MultipartForm != nil {
+		fileHeaders = append(fileHeaders, r.MultipartForm.File["screenshots"]...)
+		if len(r.MultipartForm.File["screenshot"]) > 0 {
+			fileHeaders = append(fileHeaders, r.MultipartForm.File["screenshot"]...)
+		}
+	}
+	const maxIntakeImages = 24
+	if len(fileHeaders) > maxIntakeImages {
+		fileHeaders = fileHeaders[:maxIntakeImages]
+		if screenshotWarning == "" {
+			screenshotWarning = fmt.Sprintf("maksimal %d gambar per case; sisanya diabaikan", maxIntakeImages)
+		}
+	}
+	dir := filepath.Join(s.uploadRoot, caseID)
+	if len(fileHeaders) > 0 {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			s.log.Error("mkdir upload", "err", err)
-			screenshotWarning = "gagal menyimpan screenshot (mkdir)"
+			screenshotWarning = "gagal menyimpan lampiran gambar (mkdir)"
 		} else {
-			safe := filepath.Base(hdr.Filename)
-			if safe == "." || safe == "/" {
-				safe = "screenshot"
-			}
-			dest := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), safe))
-			dst, err := os.Create(dest)
-			if err != nil {
-				s.log.Error("create upload", "err", err)
-				screenshotWarning = "gagal menyimpan screenshot (create)"
-			} else {
-				_, copyErr := io.Copy(dst, file)
+			for _, hdr := range fileHeaders {
+				if !isImageFileHeader(hdr) {
+					continue
+				}
+				f, err := hdr.Open()
+				if err != nil {
+					s.log.Error("open upload", "err", err)
+					if screenshotWarning == "" {
+						screenshotWarning = "beberapa gambar gagal dibaca"
+					}
+					continue
+				}
+				safe := filepath.Base(hdr.Filename)
+				if safe == "." || safe == "/" {
+					safe = "screenshot"
+				}
+				dest := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), safe))
+				dst, err := os.Create(dest)
+				if err != nil {
+					_ = f.Close()
+					s.log.Error("create upload", "err", err)
+					if screenshotWarning == "" {
+						screenshotWarning = "gagal menyimpan satu atau lebih gambar"
+					}
+					continue
+				}
+				_, copyErr := io.Copy(dst, f)
 				_ = dst.Close()
+				_ = f.Close()
 				if copyErr != nil {
 					s.log.Error("copy upload", "err", copyErr)
-					screenshotWarning = "gagal menyimpan screenshot (copy)"
-				} else {
-					rel, _ := filepath.Rel(s.uploadRoot, dest)
-					_ = s.store.AddAttachment(ctx, store.CaseAttachment{
-						CaseID:       caseID,
-						Kind:         "screenshot",
-						FilePath:     rel,
-						OriginalName: hdr.Filename,
-					})
+					if screenshotWarning == "" {
+						screenshotWarning = "gagal menyimpan satu atau lebih gambar"
+					}
+					continue
+				}
+				rel, _ := filepath.Rel(s.uploadRoot, dest)
+				if err := s.store.AddAttachment(ctx, store.CaseAttachment{
+					CaseID:       caseID,
+					Kind:         "screenshot",
+					FilePath:     rel,
+					OriginalName: hdr.Filename,
+				}); err != nil && screenshotWarning == "" {
+					screenshotWarning = "gagal mencatat lampiran di database"
 				}
 			}
 		}
@@ -586,7 +624,7 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 			"actor":      e.Actor,
 			"action":     e.Action,
 			"detail":     e.Detail,
-			"created_at": e.CreatedAt.UTC().Format(time.RFC3339),
+			"created_at": tz.FormatRFC3339(e.CreatedAt),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -616,8 +654,23 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("list attachments for pdf", "err", err)
 			attachments = nil
 		}
-		stepAtts, _ := s.store.ListStepAttachmentsForCase(ctx, id)
-		pdfBytes, err := render.PDF(c, steps, attachments, stepAtts, s.uploadRoot)
+		opts := render.DefaultPDFOptions()
+		// format knobs:
+		// - include_checklist=0|1
+		// - checklist_progress=0|1
+		// - compression=0|1
+		q := r.URL.Query()
+		if q.Get("include_checklist") == "0" {
+			opts.IncludeChecklist = false
+		}
+		if q.Get("checklist_progress") == "1" {
+			opts.IncludeChecklistProgress = true
+		}
+		if q.Get("compression") == "1" {
+			opts.Compression = true
+		}
+
+		pdfBytes, err := render.PDFWithOptions(c, steps, attachments, s.uploadRoot, opts)
 		if err != nil {
 			s.log.Error("render pdf", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -630,6 +683,58 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		_, _ = w.Write([]byte(render.Markdown(c, steps)))
 	}
+}
+
+const maxRCAFieldRunes = 8000
+
+func (s *Server) handlePatchRCA(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body store.CaseRCA
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	body = body.Normalize()
+	check := func(s string, name string) bool {
+		if utf8.RuneCountInString(s) > maxRCAFieldRunes {
+			http.Error(w, name+" terlalu panjang (maks "+strconv.Itoa(maxRCAFieldRunes)+" karakter)", http.StatusBadRequest)
+			return false
+		}
+		return true
+	}
+	if !check(body.IncidentTimeline, "kronologi") || !check(body.RootCause, "akar masalah") ||
+		!check(body.ContributingFactors, "faktor kontributor") || !check(body.CorrectiveActions, "tindakan korektif") ||
+		!check(body.PreventiveActions, "tindakan pencegahan") {
+		return
+	}
+	for i, w := range body.FiveWhys {
+		if !check(w, "5 whys #"+strconv.Itoa(i+1)) {
+			return
+		}
+	}
+	j, err := store.MarshalCaseRCAJSON(body)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	ctx := r.Context()
+	c0, err := s.store.GetCase(ctx, id)
+	if err != nil || c0 == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err := s.store.UpdateCaseRCA(ctx, id, j); err != nil {
+		s.log.Error("update rca", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	_ = s.store.LogAudit(ctx, id, "", "rca_updated", "")
+	c, err := s.store.GetCase(ctx, id)
+	if err != nil || c == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, caseToJSON(*c))
 }
 
 func (s *Server) handleFinalReport(w http.ResponseWriter, r *http.Request) {
@@ -701,6 +806,41 @@ func (s *Server) handleAttachmentRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, full)
+}
+
+func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("caseId")
+	attStr := r.PathValue("attId")
+	attID, err := strconv.ParseInt(attStr, 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	found, err := s.store.GetAttachmentByID(ctx, caseID, attID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if found == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	base := filepath.Clean(s.uploadRoot)
+	full := filepath.Clean(filepath.Join(s.uploadRoot, filepath.FromSlash(found.FilePath)))
+	rel, err := filepath.Rel(base, full)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	_ = os.Remove(full)
+	if err := s.store.DeleteAttachment(ctx, caseID, attID); err != nil {
+		s.log.Error("delete attachment", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	_ = s.store.LogAudit(ctx, caseID, "", "attachment_deleted", fmt.Sprintf("att_id=%d", attID))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleUploadStepAttachment(w http.ResponseWriter, r *http.Request) {
@@ -795,8 +935,8 @@ func caseToJSON(c store.Case) map[string]any {
 		"severity":   c.Severity,
 		"status":     c.Status,
 		"reporter":   c.Reporter,
-		"created_at": c.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at": c.UpdatedAt.UTC().Format(time.RFC3339),
+		"created_at": tz.FormatRFC3339(c.CreatedAt),
+		"updated_at": tz.FormatRFC3339(c.UpdatedAt),
 		"sop_slug":   c.SOPSlug,
 		"sop_title":  c.SOPTitle,
 	}
@@ -807,7 +947,17 @@ func caseToJSON(c store.Case) map[string]any {
 		m["sop_version"] = *c.SOPVersion
 	}
 	if c.ResolvedAt != nil {
-		m["resolved_at"] = c.ResolvedAt.UTC().Format(time.RFC3339)
+		m["resolved_at"] = tz.FormatRFC3339(*c.ResolvedAt)
+	}
+	rca := store.ParseCaseRCAJSON(c.RCAJSON)
+	rca = rca.Normalize()
+	m["rca"] = map[string]any{
+		"incident_timeline":     rca.IncidentTimeline,
+		"five_whys":             rca.FiveWhys,
+		"root_cause":            rca.RootCause,
+		"contributing_factors":  rca.ContributingFactors,
+		"corrective_actions":    rca.CorrectiveActions,
+		"preventive_actions":    rca.PreventiveActions,
 	}
 	return m
 }
@@ -827,7 +977,7 @@ func stepsWithAttachmentsToJSON(steps []store.CaseStep, stepAtts map[int64][]sto
 			"evidence_url":      st.EvidenceURL,
 		}
 		if st.DoneAt != nil {
-			row["done_at"] = st.DoneAt.UTC().Format(time.RFC3339)
+			row["done_at"] = tz.FormatRFC3339(*st.DoneAt)
 		} else {
 			row["done_at"] = nil
 		}
@@ -846,4 +996,21 @@ func stepsWithAttachmentsToJSON(steps []store.CaseStep, stepAtts map[int64][]sto
 		out = append(out, row)
 	}
 	return out
+}
+
+func isImageFileHeader(fh *multipart.FileHeader) bool {
+	if fh == nil {
+		return false
+	}
+	ct := strings.ToLower(fh.Header.Get("Content-Type"))
+	if strings.HasPrefix(ct, "image/") {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(fh.Filename))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".bmp", ".svg":
+		return true
+	default:
+		return false
+	}
 }

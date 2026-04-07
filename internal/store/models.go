@@ -18,6 +18,7 @@ type Case struct {
 	ResolvedAt  *time.Time
 	SOPSlug     string
 	SOPTitle    string
+	RCAJSON     string // JSON CaseRCA; empty if unset
 }
 
 // CaseStep is one checklist step for a case.

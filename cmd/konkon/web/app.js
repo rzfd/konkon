@@ -1,18 +1,31 @@
 const app = document.getElementById("app");
 
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const IC  = "w-full px-3 py-2 bg-[#0c1016] border border-[#2a3545] rounded-lg text-sm text-[#e7ecf3] focus:outline-none focus:border-[#3d8bfd] focus:ring-1 focus:ring-[#3d8bfd]/20 transition-colors";
+// ── Design tokens (dark theme) ────────────────────────────────────────────────
+const IC  = "w-full px-3 py-2 bg-[#0f172a] border border-[#253041] rounded-lg text-sm text-[#e7ecf3] placeholder:text-[#7e8aa0] focus:outline-none focus:border-[#60a5fa] focus:ring-1 focus:ring-sky-300/20 transition-colors";
 const TA  = IC + " resize-y min-h-[80px]";
-const SC  = "w-full px-3 py-2 bg-[#0c1016] border border-[#2a3545] rounded-lg text-sm text-[#e7ecf3] focus:outline-none focus:border-[#3d8bfd] transition-colors";
-const LB  = "block text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] mb-1.5";
-const Btn = "inline-flex items-center gap-1.5 px-4 py-2 bg-[#3d8bfd] text-white text-sm font-semibold rounded-lg hover:bg-[#2d78ed] transition-colors border-0 cursor-pointer";
-const BtnSm = "inline-flex items-center gap-1 px-3 py-1.5 bg-[#2a3545] text-[#e7ecf3] text-xs font-medium rounded-lg hover:bg-[#334155] transition-colors border-0 cursor-pointer";
-const BtnGhost = "inline-flex items-center gap-1 px-3 py-1.5 text-[#8b98a8] text-xs font-medium rounded-lg hover:text-[#e7ecf3] hover:bg-[#2a3545] transition-colors border-0 cursor-pointer bg-transparent";
-const BtnDanger = "inline-flex items-center gap-1 px-3 py-1.5 text-[#f07178] text-xs font-medium rounded-lg hover:bg-[#f07178]/10 transition-colors border border-[#f07178]/20 bg-transparent cursor-pointer";
-const Card = "bg-[#1a2332] border border-[#2a3545] rounded-xl p-6 mb-4";
+const SC  = IC + "";
+const LB  = "block text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] mb-1.5";
+const Btn = "inline-flex items-center gap-1.5 px-4 py-2 bg-[#60a5fa] text-[#07101f] text-sm font-semibold rounded-lg hover:bg-[#93c5fd] transition-colors border-0 cursor-pointer";
+const BtnSm = "inline-flex items-center gap-1 px-3 py-1.5 bg-[#121a26] text-[#e7ecf3] text-xs font-medium rounded-lg hover:bg-[#172235] transition-colors border border-[#253041] cursor-pointer";
+const BtnGhost = "inline-flex items-center gap-1 px-3 py-1.5 text-[#a9b4c4] text-xs font-medium rounded-lg hover:text-[#e7ecf3] hover:bg-[#121a26] transition-colors border-0 cursor-pointer bg-transparent";
+const BtnDanger = "inline-flex items-center gap-1 px-3 py-1.5 text-[#f07178] text-xs font-medium rounded-lg hover:bg-[#2a1217] transition-colors border border-[#5a2a35] bg-transparent cursor-pointer";
+const Card = "bg-[#121a26] border border-[#253041] rounded-2xl p-6 mb-4 shadow-[0_10px_30px_rgba(0,0,0,0.35)]";
 const Err  = "text-[#f07178] text-xs mt-2 min-h-[1rem]";
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
+/** Format API ISO timestamp for display as Jakarta (WIB); backend already sends +07:00. */
+function fmtWIB(iso) {
+  if (!iso) return "—";
+  const s = String(iso);
+  const i = s.indexOf("T");
+  if (i === -1) return s;
+  const date = s.slice(0, i);
+  const rest = s.slice(i + 1);
+  const timeEnd = rest.search(/[Z+-]/);
+  const time = timeEnd === -1 ? rest.slice(0, 5) : rest.slice(0, Math.min(5, timeEnd));
+  return `${date} ${time} WIB`;
+}
+
 function esc(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -43,9 +56,9 @@ async function api(path, opts = {}) {
 function badge(status) {
   const s = (status || "").toLowerCase();
   const map = {
-    needs_triage: "bg-[#f0c14b]/15 text-[#fcd34d] border border-[#f0c14b]/20",
-    open:         "bg-[#3d8bfd]/15 text-[#93c5fd] border border-[#3d8bfd]/20",
-    resolved:     "bg-[#3ecf8e]/15 text-[#6ee7b7] border border-[#3ecf8e]/20",
+    needs_triage: "bg-amber-400/10 text-amber-200 border border-amber-400/20",
+    open:         "bg-sky-400/10 text-sky-200 border border-sky-400/20",
+    resolved:     "bg-emerald-400/10 text-emerald-200 border border-emerald-400/20",
   };
   const cls = map[s] || map.open;
   return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide ${cls}">${esc(status)}</span>`;
@@ -53,13 +66,27 @@ function badge(status) {
 
 function actionColor(action) {
   const map = {
-    case_created: "bg-[#3d8bfd]/15 text-[#93c5fd]",
-    sop_assigned: "bg-[#8b5cf6]/15 text-[#c4b5fd]",
-    step_done:    "bg-[#3ecf8e]/15 text-[#6ee7b7]",
-    step_undone:  "bg-[#8b98a8]/15 text-[#8b98a8]",
-    case_closed:  "bg-[#f0c14b]/15 text-[#fde68a]",
+    case_created: "bg-sky-400/10 text-sky-200",
+    sop_assigned: "bg-violet-400/10 text-violet-200",
+    step_done:    "bg-emerald-400/10 text-emerald-200",
+    step_undone:  "bg-slate-400/10 text-slate-200",
+    case_closed:  "bg-amber-400/10 text-amber-200",
   };
-  return map[action] || "bg-[#2a3545] text-[#8b98a8]";
+  return map[action] || "bg-slate-400/10 text-slate-200";
+}
+
+function normalizeRca(rca) {
+  const r = rca && typeof rca === "object" ? rca : {};
+  const whys = Array.isArray(r.five_whys) ? r.five_whys.slice(0, 5) : [];
+  while (whys.length < 5) whys.push("");
+  return {
+    incident_timeline: r.incident_timeline || "",
+    five_whys: whys,
+    root_cause: r.root_cause || "",
+    contributing_factors: r.contributing_factors || "",
+    corrective_actions: r.corrective_actions || "",
+    preventive_actions: r.preventive_actions || "",
+  };
 }
 
 function caseMetaHtml(c) {
@@ -67,14 +94,14 @@ function caseMetaHtml(c) {
     ["Layanan",    c.service],
     ["Severity",   c.severity],
     ["Pelapor",    c.reporter],
-    ["Dibuat",     c.created_at?.slice(0, 16).replace("T", " ")],
-    ["Diperbarui", c.updated_at?.slice(0, 16).replace("T", " ")],
+    ["Dibuat",     fmtWIB(c.created_at)],
+    ["Diperbarui", fmtWIB(c.updated_at)],
   ];
-  if (c.resolved_at) rows.push(["Selesai", c.resolved_at?.slice(0, 16).replace("T", " ")]);
+  if (c.resolved_at) rows.push(["Selesai", fmtWIB(c.resolved_at)]);
   return `<dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
     ${rows.map(([label, val]) => `
       <div>
-        <dt class="text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] mb-0.5">${esc(label)}</dt>
+        <dt class="text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] mb-0.5">${esc(label)}</dt>
         <dd class="text-sm font-medium text-[#e7ecf3]">${esc(val || "—")}</dd>
       </div>`).join("")}
   </dl>`;
@@ -86,11 +113,11 @@ function confirmDialog(message) {
     const overlay = document.createElement("div");
     overlay.className = "fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50";
     overlay.innerHTML = `
-      <div class="bg-[#1a2332] border border-[#2a3545] rounded-2xl p-6 max-w-sm w-[90vw] shadow-2xl">
+      <div class="bg-[#121a26] border border-[#253041] rounded-2xl p-6 max-w-sm w-[90vw] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
         <p class="text-sm text-[#e7ecf3] leading-relaxed mb-6">${esc(message)}</p>
         <div class="flex justify-end gap-2">
           <button class="modal-cancel ${BtnGhost}">Batal</button>
-          <button class="modal-ok px-4 py-2 text-sm font-semibold text-white bg-[#f07178] rounded-lg hover:bg-[#e05c6b] transition-colors border-0 cursor-pointer">Ya, lanjutkan</button>
+          <button class="modal-ok px-4 py-2 text-sm font-semibold text-[#07101f] bg-[#f07178] rounded-lg hover:bg-[#ff8a90] transition-colors border-0 cursor-pointer">Ya, lanjutkan</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -103,7 +130,7 @@ function confirmDialog(message) {
 let homeState = { page: 1, status: "", severity: "", search: "", timer: null };
 
 async function renderHome() {
-  app.innerHTML = `<div class="${Card}"><p class="text-sm text-[#8b98a8]">Memuat…</p></div>`;
+  app.innerHTML = `<div class="${Card}"><p class="text-sm text-[#a9b4c4]">Memuat…</p></div>`;
   const { page, status, severity, search } = homeState;
   const params = new URLSearchParams({ page, limit: 20 });
   if (status)   params.set("status", status);
@@ -113,18 +140,18 @@ async function renderHome() {
   try {
     const cases = await api(`/api/cases?${params}`);
     const rows = (cases || []).map((c) => `
-      <tr class="border-t border-[#2a3545] hover:bg-[#3d8bfd]/5 transition-colors cursor-pointer group">
+      <tr class="border-t border-[#253041] hover:bg-[#0f172a] transition-colors cursor-pointer group">
         <td class="py-3 pr-5 align-middle">
-          <a href="#/case/${esc(c.case_id)}" class="text-xs font-mono font-semibold text-[#3d8bfd] no-underline group-hover:text-[#60a5fa]">${esc(c.case_id)}</a>
+          <a href="#/case/${esc(c.case_id)}" class="text-xs font-mono font-semibold text-[#93c5fd] no-underline group-hover:text-[#e7ecf3]">${esc(c.case_id)}</a>
         </td>
         <td class="py-3 pr-5 align-middle text-sm text-[#e7ecf3] max-w-[240px] truncate">${esc(c.title)}</td>
-        <td class="py-3 pr-5 align-middle text-xs text-[#8b98a8]">${esc(c.service || "—")}</td>
+        <td class="py-3 pr-5 align-middle text-xs text-[#a9b4c4]">${esc(c.service || "—")}</td>
         <td class="py-3 pr-5 align-middle">
-          ${c.severity ? `<span class="text-[10px] font-bold text-[#8b98a8] bg-[#2a3545] px-1.5 py-0.5 rounded">${esc(c.severity)}</span>` : "<span class='text-[#8b98a8]'>—</span>"}
+          ${c.severity ? `<span class="text-[10px] font-bold text-[#a9b4c4] bg-[#121a26] border border-[#253041] px-1.5 py-0.5 rounded">${esc(c.severity)}</span>` : "<span class='text-[#a9b4c4]'>—</span>"}
         </td>
-        <td class="py-3 pr-5 align-middle text-xs text-[#8b98a8]">${esc(c.reporter || "—")}</td>
+        <td class="py-3 pr-5 align-middle text-xs text-[#a9b4c4]">${esc(c.reporter || "—")}</td>
         <td class="py-3 pr-5 align-middle">${badge(c.status)}</td>
-        <td class="py-3 align-middle text-xs font-mono text-[#8b98a8]">${esc(c.sop_slug || "—")}</td>
+        <td class="py-3 align-middle text-xs font-mono text-[#a9b4c4]">${esc(c.sop_slug || "—")}</td>
       </tr>`).join("");
 
     app.innerHTML = `
@@ -162,28 +189,28 @@ async function renderHome() {
           <table class="w-full border-collapse">
             <thead>
               <tr>
-                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] pb-3 pr-5">ID</th>
-                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] pb-3 pr-5">Judul</th>
-                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] pb-3 pr-5">Layanan</th>
-                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] pb-3 pr-5">Sev</th>
-                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] pb-3 pr-5">Pelapor</th>
-                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] pb-3 pr-5">Status</th>
-                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#8b98a8] pb-3">SOP</th>
+                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] pb-3 pr-5">ID</th>
+                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] pb-3 pr-5">Judul</th>
+                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] pb-3 pr-5">Layanan</th>
+                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] pb-3 pr-5">Sev</th>
+                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] pb-3 pr-5">Pelapor</th>
+                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] pb-3 pr-5">Status</th>
+                <th class="text-left text-[10px] font-semibold uppercase tracking-widest text-[#a9b4c4] pb-3">SOP</th>
               </tr>
             </thead>
-            <tbody>${rows || `<tr><td colspan="7" class="py-8 text-center text-sm text-[#8b98a8]">Tidak ada case ditemukan</td></tr>`}</tbody>
+            <tbody>${rows || `<tr><td colspan="7" class="py-8 text-center text-sm text-[#a9b4c4]">Tidak ada case ditemukan</td></tr>`}</tbody>
           </table>
         </div>
 
         <!-- Pagination -->
         <div class="flex items-center justify-center gap-3 mt-5 select-none">
           <button id="pgPrev" ${page <= 1 ? "disabled" : ""}
-            class="!mt-0 !w-9 !h-9 !p-0 !rounded-full !bg-[#2a3545] !text-[#e7ecf3] !text-xl !font-bold hover:!bg-[#3d8bfd] disabled:!opacity-30 disabled:!cursor-not-allowed !transition-colors !duration-150 flex items-center justify-center border-0 cursor-pointer">
+            class="!mt-0 !w-9 !h-9 !p-0 !rounded-full !bg-[#121a26] !text-[#e7ecf3] !text-xl !font-bold hover:!bg-[#60a5fa] hover:!text-[#07101f] disabled:!opacity-30 disabled:!cursor-not-allowed !transition-colors !duration-150 flex items-center justify-center border border-[#253041] cursor-pointer">
             ‹
           </button>
-          <span class="text-xs text-[#8b98a8] min-w-[5rem] text-center tabular-nums">Halaman ${page}</span>
+          <span class="text-xs text-[#a9b4c4] min-w-[5rem] text-center tabular-nums">Halaman ${page}</span>
           <button id="pgNext" ${(cases || []).length < 20 ? "disabled" : ""}
-            class="!mt-0 !w-9 !h-9 !p-0 !rounded-full !bg-[#2a3545] !text-[#e7ecf3] !text-xl !font-bold hover:!bg-[#3d8bfd] disabled:!opacity-30 disabled:!cursor-not-allowed !transition-colors !duration-150 flex items-center justify-center border-0 cursor-pointer">
+            class="!mt-0 !w-9 !h-9 !p-0 !rounded-full !bg-[#121a26] !text-[#e7ecf3] !text-xl !font-bold hover:!bg-[#60a5fa] hover:!text-[#07101f] disabled:!opacity-30 disabled:!cursor-not-allowed !transition-colors !duration-150 flex items-center justify-center border border-[#253041] cursor-pointer">
             ›
           </button>
         </div>
@@ -224,11 +251,47 @@ async function renderHome() {
 const DRAFT_KEY = "konkon_new_case_draft";
 
 async function renderNew() {
+  /** @type {File[]} */
+  let pendingIntakeImages = [];
+
+  function renderIntakeList() {
+    const list = document.getElementById("intake-list");
+    if (!list) return;
+    if (!pendingIntakeImages.length) {
+      list.innerHTML = `<p class="text-xs text-[#a9b4c4] m-0">Belum ada gambar. Tambah beberapa lalu hapus yang tidak dipakai sebelum kirim.</p>`;
+      return;
+    }
+    list.innerHTML = pendingIntakeImages.map((file, idx) => `
+      <div class="flex items-center gap-3 py-2 border-b border-[#253041] last:border-0 intake-row" data-idx="${idx}">
+        <div class="w-14 h-14 rounded-lg overflow-hidden border border-[#253041] shrink-0 bg-[#0f172a] flex items-center justify-center">
+          <img src="" alt="" class="intake-thumb max-w-full max-h-full object-contain hidden" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-xs font-medium text-[#e7ecf3] truncate m-0">${esc(file.name)}</p>
+          <p class="text-[10px] text-[#a9b4c4] m-0">${(file.size / 1024).toFixed(1)} KB</p>
+        </div>
+        <button type="button" class="intake-remove ${BtnDanger} shrink-0 text-[10px] py-1 px-2">Hapus</button>
+      </div>`).join("");
+    list.querySelectorAll(".intake-row").forEach((row) => {
+      const idx = Number(row.getAttribute("data-idx"));
+      const url = URL.createObjectURL(pendingIntakeImages[idx]);
+      const img = row.querySelector(".intake-thumb");
+      img.src = url;
+      img.classList.remove("hidden");
+      img.onload = () => URL.revokeObjectURL(url);
+      row.querySelector(".intake-remove").addEventListener("click", () => {
+        pendingIntakeImages = pendingIntakeImages.filter((_, j) => j !== idx);
+        renderIntakeList();
+        attachFormChecker({ getScreensFilled: () => pendingIntakeImages.length > 0 });
+      });
+    });
+  }
+
   app.innerHTML = `
     <div class="${Card}">
       <div class="mb-6">
         <h2 class="text-base font-semibold text-[#e7ecf3] m-0 mb-1">Buat case baru</h2>
-        <p class="text-xs text-[#8b98a8] m-0">Sistem memetakan SOP secara otomatis via rule berdasarkan service, keyword, dan severity.</p>
+        <p class="text-xs text-[#a9b4c4] m-0">Sistem memetakan SOP secara otomatis via rule berdasarkan service, keyword, dan severity.</p>
       </div>
 
       <form id="f" class="space-y-4">
@@ -237,16 +300,16 @@ async function renderNew() {
           <input name="title" required placeholder="mis. Timeout checkout payment" class="${IC}" />
         </div>
         <div>
-          <label class="${LB}">Ringkasan<span class="field-status" id="fst-summary"></span></label>
+          <label class="${LB}">Ringkasan <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span><span class="field-status" id="fst-summary"></span></label>
           <textarea name="summary" placeholder="Gejala singkat, dampak, dan konteks…" class="${TA}"></textarea>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label class="${LB}">Layanan<span class="field-status" id="fst-service"></span></label>
+            <label class="${LB}">Layanan <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span><span class="field-status" id="fst-service"></span></label>
             <input name="service" placeholder="payment, auth, …" class="${IC}" />
           </div>
           <div>
-            <label class="${LB}">Severity<span class="field-status" id="fst-severity"></span></label>
+            <label class="${LB}">Severity <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span><span class="field-status" id="fst-severity"></span></label>
             <select name="severity" class="${SC}">
               <option value="">— pilih —</option>
               <option>P1</option><option>P2</option><option>P3</option><option>P4</option>
@@ -254,13 +317,14 @@ async function renderNew() {
           </div>
         </div>
         <div>
-          <label class="${LB}">Pelapor<span class="field-status" id="fst-reporter"></span></label>
+          <label class="${LB}">Pelapor <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span><span class="field-status" id="fst-reporter"></span></label>
           <input name="reporter" placeholder="nama / @handle" class="${IC}" />
         </div>
         <div>
-          <label class="${LB}">Screenshot<span class="field-status" id="fst-screenshot"></span></label>
-          <input type="file" name="screenshot" accept="image/*"
-            class="w-full text-xs text-[#8b98a8] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-[#2a3545] file:text-[#e7ecf3] file:cursor-pointer hover:file:bg-[#334155] file:transition-colors" />
+          <label class="${LB}">Gambar lampiran <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional, bisa banyak)</span><span class="field-status" id="fst-screenshots"></span></label>
+          <input type="file" id="intake-pick" accept="image/*" multiple class="hidden" />
+          <button type="button" id="intake-add" class="${BtnGhost} text-xs mb-2">+ Tambah gambar</button>
+          <div id="intake-list" class="rounded-lg border border-[#253041] bg-[#0f172a]/40 px-3 py-2"></div>
         </div>
 
         <div id="form-checker-status" class="form-checker has-warn"></div>
@@ -274,13 +338,28 @@ async function renderNew() {
     </div>`;
 
   restoreDraft();
-  attachFormChecker();
+  renderIntakeList();
+  attachFormChecker({ getScreensFilled: () => pendingIntakeImages.length > 0 });
+
+  document.getElementById("intake-add").addEventListener("click", () => document.getElementById("intake-pick").click());
+  document.getElementById("intake-pick").addEventListener("change", (ev) => {
+    const files = Array.from(ev.target.files || []);
+    ev.target.value = "";
+    const max = 24;
+    const room = max - pendingIntakeImages.length;
+    if (room <= 0) return;
+    pendingIntakeImages.push(...files.slice(0, room));
+    renderIntakeList();
+    attachFormChecker({ getScreensFilled: () => pendingIntakeImages.length > 0 });
+  });
 
   document.getElementById("f").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const errEl = document.getElementById("err");
     errEl.textContent = "";
     const fd = new FormData(ev.target);
+    fd.delete("screenshots");
+    pendingIntakeImages.forEach((file) => fd.append("screenshots", file, file.name));
     try {
       const res = await fetch("/api/cases", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
@@ -299,7 +378,9 @@ async function renderNew() {
   document.getElementById("clearDraft").addEventListener("click", () => {
     localStorage.removeItem(DRAFT_KEY);
     document.querySelectorAll("#f input:not([type=file]), #f textarea, #f select").forEach((el) => { el.value = ""; });
-    attachFormChecker();
+    pendingIntakeImages = [];
+    renderIntakeList();
+    attachFormChecker({ getScreensFilled: () => pendingIntakeImages.length > 0 });
   });
 }
 
@@ -327,7 +408,7 @@ function restoreDraft() {
 
 // ── Case Detail ───────────────────────────────────────────────────────────────
 async function renderCase(id) {
-  app.innerHTML = `<div class="${Card}"><p class="text-sm text-[#8b98a8]">Memuat…</p></div>`;
+  app.innerHTML = `<div class="${Card}"><p class="text-sm text-[#a9b4c4]">Memuat…</p></div>`;
   try {
     const [c, steps, atts, sops, audit] = await Promise.all([
       api(`/api/cases/${encodeURIComponent(id)}`),
@@ -341,28 +422,38 @@ async function renderCase(id) {
       `<option value="${esc(s.slug)}">${esc(s.slug)} — ${esc(s.title)}</option>`).join("");
 
     const attHtml = (atts || []).map((a) => {
+      const del = `<button type="button" class="del-case-att ${BtnDanger} text-[10px] py-0.5 px-2 shrink-0" data-att-id="${esc(String(a.id))}">Hapus</button>`;
       if ((a.kind || "") === "screenshot" && a.url) {
         return `<div class="attach">
-          <a href="${esc(a.url)}" target="_blank" rel="noopener" class="text-xs text-[#3d8bfd] no-underline hover:underline">${esc(a.original_name || "screenshot")}</a>
-          <br/><img src="${esc(a.url)}" alt="" />
+          <div class="flex items-start justify-between gap-2 mb-1">
+            <a href="${esc(a.url)}" target="_blank" rel="noopener" class="text-xs text-[#93c5fd] no-underline hover:underline min-w-0">${esc(a.original_name || "screenshot")}</a>
+            ${del}
+          </div>
+          <img src="${esc(a.url)}" alt="" />
         </div>`;
       }
-      return `<div><a href="${esc(a.url)}" target="_blank" rel="noopener" class="text-xs text-[#3d8bfd] no-underline hover:underline">${esc(a.original_name || "file")}</a></div>`;
+      return `<div class="flex items-center justify-between gap-2">
+          <a href="${esc(a.url)}" target="_blank" rel="noopener" class="text-xs text-[#93c5fd] no-underline hover:underline min-w-0">${esc(a.original_name || "file")}</a>
+          ${del}
+        </div>`;
     }).join("");
 
     const stepItems = (steps || []).map((st) => {
       const done = !!st.done_at;
-      const borderCls = done ? "border-[#3ecf8e]/20" : "border-[#2a3545]";
-      const bgCls     = done ? "bg-[#3ecf8e]/5" : "bg-[#0f1419]/40";
-      const circleCls = done ? "bg-[#3ecf8e]/20 text-[#3ecf8e]" : "bg-[#2a3545] text-[#8b98a8]";
+      const borderCls = done ? "border-[#3ecf8e]/20" : "border-[#253041]";
+      const bgCls     = done ? "bg-emerald-400/10" : "bg-slate-400/5";
+      const circleCls = done ? "bg-[#3ecf8e]/20 text-[#3ecf8e]" : "bg-[#121a26] text-[#a9b4c4] border border-[#253041]";
       const badges = [
         st.requires_evidence ? `<span class="flex-none text-[10px] font-bold uppercase tracking-wide text-[#f0c14b] bg-[#f0c14b]/10 border border-[#f0c14b]/20 px-1.5 py-0.5 rounded">bukti wajib</span>` : "",
-        st.optional ? `<span class="flex-none text-[10px] font-bold uppercase tracking-wide text-[#8b98a8] bg-[#8b98a8]/10 border border-[#8b98a8]/20 px-1.5 py-0.5 rounded">opsional</span>` : "",
+        st.optional ? `<span class="flex-none text-[10px] font-bold uppercase tracking-wide text-[#a9b4c4] bg-[#a9b4c4]/10 border border-[#a9b4c4]/20 px-1.5 py-0.5 rounded">opsional</span>` : "",
       ].filter(Boolean).join("");
-      const uploadedImgs = (st.attachments || []).map(a =>
+      const uploadedImgs = (st.attachments || []).map((a) =>
         `<div class="mt-2">
-           <p class="text-[10px] text-[#8b98a8] mb-1">${esc(a.original_name)}</p>
-           <img src="${esc(a.url)}" class="max-w-full rounded-lg border border-[#2a3545]" style="max-height:200px;object-fit:contain" />
+           <div class="flex items-center justify-between gap-2 mb-1">
+             <p class="text-[10px] text-[#a9b4c4] m-0 truncate">${esc(a.original_name)}</p>
+             <button type="button" class="del-step-att ${BtnDanger} text-[10px] py-0.5 px-2 shrink-0" data-att-id="${esc(String(a.id))}">Hapus</button>
+           </div>
+           <img src="${esc(a.url)}" class="max-w-full rounded-lg border border-[#253041]" style="max-height:200px;object-fit:contain" alt="" />
          </div>`
       ).join("");
       return `<li data-id="${st.id}" data-req-ev="${st.requires_evidence}"
@@ -379,10 +470,10 @@ async function renderCase(id) {
               <span class="text-sm font-medium text-[#e7ecf3]">${esc(st.title)}</span>
               <div class="flex gap-1 flex-wrap justify-end">${badges}</div>
             </div>
-            <p class="text-xs text-[#8b98a8] mb-3">${done ? `Selesai ${esc(st.done_at?.slice(0,16).replace("T"," "))} · ${esc(st.done_by || "")}` : "Belum selesai"}</p>
+            <p class="text-xs text-[#a9b4c4] mb-3">${done ? `Selesai ${esc(fmtWIB(st.done_at))} · ${esc(st.done_by || "")}` : "Belum selesai"}</p>
 
             <!-- Fields -->
-            <div class="space-y-2.5 pt-3 border-t border-[#2a3545]/60">
+            <div class="space-y-2.5 pt-3 border-t border-[#253041]">
               <div>
                 <label class="${LB}">URL Bukti</label>
                 <input type="url" class="ev ${IC} text-xs" placeholder="https://…" value="${esc(st.evidence_url || "")}" />
@@ -400,10 +491,10 @@ async function renderCase(id) {
               </div>
               <!-- Upload bukti gambar -->
               <div>
-                <label class="${LB}">Upload Bukti (JPG/PNG)</label>
-                <input type="file" accept="image/jpeg,image/png,image/gif" class="step-upload-file hidden" />
-                <button type="button" class="step-upload-btn ${BtnGhost} text-xs">+ Upload Gambar</button>
-                <div class="step-upload-progress text-xs text-[#8b98a8] mt-1 hidden">Mengunggah…</div>
+                <label class="${LB}">Upload bukti <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional, bisa beberapa)</span></label>
+                <input type="file" accept="image/jpeg,image/png,image/gif" multiple class="step-upload-file hidden" />
+                <button type="button" class="step-upload-btn ${BtnGhost} text-xs">+ Upload gambar</button>
+                <div class="step-upload-progress text-xs text-[#a9b4c4] mt-1 hidden">Mengunggah…</div>
               </div>
               ${uploadedImgs ? `<div class="step-imgs space-y-2">${uploadedImgs}</div>` : `<div class="step-imgs space-y-2"></div>`}
               <div class="flex gap-2 pt-1">
@@ -415,39 +506,46 @@ async function renderCase(id) {
         </li>`;
     }).join("");
 
+    const rca = normalizeRca(c.rca);
+    const rcaWhyFields = [1, 2, 3, 4, 5].map((n) => `
+        <div>
+          <label class="${LB}">Why ${n} <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+          <textarea id="rca-why-${n}" rows="2" class="${TA} min-h-[52px]">${esc(rca.five_whys[n - 1])}</textarea>
+        </div>`).join("");
+
     const auditHtml = (audit || []).length
       ? `<div class="space-y-3">
           ${(audit || []).map((e) => `
           <div class="flex gap-3 items-start">
-            <span class="text-[10px] font-mono text-[#8b98a8] whitespace-nowrap mt-0.5 w-32 shrink-0">
-              ${esc(e.created_at?.slice(0,16).replace("T"," "))}
+            <span class="text-[10px] font-mono text-[#a9b4c4] whitespace-nowrap mt-0.5 w-32 shrink-0">
+              ${esc(fmtWIB(e.created_at))}
             </span>
             <div class="flex flex-wrap gap-1.5 items-baseline">
               <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${actionColor(e.action)}">${esc(e.action)}</span>
               ${e.actor  ? `<span class="text-xs font-medium text-[#e7ecf3]">${esc(e.actor)}</span>` : ""}
-              ${e.detail ? `<span class="text-xs text-[#8b98a8]">${esc(e.detail)}</span>` : ""}
+              ${e.detail ? `<span class="text-xs text-[#a9b4c4]">${esc(e.detail)}</span>` : ""}
             </div>
           </div>`).join("")}
         </div>`
-      : `<p class="text-xs text-[#8b98a8]">Belum ada aktivitas.</p>`;
+      : `<p class="text-xs text-[#a9b4c4]">Belum ada aktivitas.</p>`;
 
     app.innerHTML = `
       <!-- RCA header (selaras PDF / HTML export) -->
       <div class="mb-4">
-        <a href="#/" class="inline-flex items-center gap-1 text-xs text-[#8b98a8] hover:text-[#e7ecf3] no-underline mb-3 transition-colors">← Kembali</a>
-        <div class="rounded-xl border border-[#1e3a5f] bg-[#121a26] overflow-hidden relative">
-          <div class="absolute bottom-0 left-0 right-0 h-1 bg-[#78c8ff]"></div>
+        <a href="#/" class="inline-flex items-center gap-1 text-xs text-[#a9b4c4] hover:text-[#e7ecf3] no-underline mb-3 transition-colors">← Kembali</a>
+        <div class="rounded-2xl border border-[#253041] bg-[#121a26] overflow-hidden relative shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
+          <div class="absolute bottom-0 left-0 right-0 h-1 bg-[#60a5fa]"></div>
           <div class="p-5 pb-6 pr-4 sm:pr-44">
-            <p class="text-[11px] font-bold uppercase tracking-[0.06em] text-[#78c8ff] m-0 mb-1.5">Konkon TechOps · Root Cause Analysis (RCA)</p>
-            <p class="text-sm font-mono font-bold text-[#78c8ff] m-0 mb-1">${esc(c.case_id)}</p>
-            <h1 class="text-xl font-extrabold text-[#f8fafc] m-0 mb-3 leading-snug">${esc(c.title)}</h1>
+            <p class="text-[11px] font-bold uppercase tracking-[0.06em] text-[#93c5fd] m-0 mb-1.5">Konkon TechOps · Root Cause Analysis (RCA)</p>
+            <p class="text-sm font-mono font-bold text-[#93c5fd] m-0 mb-1">${esc(c.case_id)}</p>
+            <h1 class="text-xl font-extrabold text-[#e7ecf3] m-0 mb-3 leading-snug">${esc(c.title)}</h1>
             <div class="flex flex-wrap gap-2 items-center">
               ${badge(c.status)}
-              ${c.severity ? `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#3d8bfd]/15 text-[#93c5fd] border border-[#3d8bfd]/25">${esc(c.severity)}</span>` : ""}
-              ${c.service ? `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#2a3545] text-[#94a3b8] border border-[#334155]">${esc(c.service)}</span>` : ""}
-              ${c.sop_slug ? `<span class="text-xs text-[#8b98a8]">SOP: <span class="font-mono">${esc(c.sop_slug)}</span>${c.sop_version != null ? ` <span class="text-[10px]">v${esc(c.sop_version)}</span>` : ""}</span>` : ""}
+              ${c.severity ? `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide bg-sky-400/10 text-sky-200 border border-sky-400/20">${esc(c.severity)}</span>` : ""}
+              ${c.service ? `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide bg-slate-400/10 text-slate-200 border border-slate-400/20">${esc(c.service)}</span>` : ""}
+              ${c.sop_slug ? `<span class="text-xs text-[#a9b4c4]">SOP: <span class="font-mono">${esc(c.sop_slug)}</span>${c.sop_version != null ? ` <span class="text-[10px]">v${esc(c.sop_version)}</span>` : ""}</span>` : ""}
             </div>
-            ${c.summary ? `<p class="text-sm text-[#cbd5e1] mt-4 mb-0 leading-relaxed border-t border-[#2a3545] pt-4"><span class="text-[11px] font-bold uppercase tracking-wider text-[#78c8ff] block mb-1.5">Ringkasan eksekutif</span>${esc(c.summary)}</p>` : ""}
+            ${c.summary ? `<p class="text-sm text-[#a9b4c4] mt-4 mb-0 leading-relaxed border-t border-[#253041] pt-4"><span class="text-[11px] font-bold uppercase tracking-wider text-[#93c5fd] block mb-1.5">Ringkasan eksekutif</span>${esc(c.summary)}</p>` : ""}
           </div>
           <div class="absolute top-4 right-4 flex flex-col sm:flex-row gap-2">
             <a class="${BtnSm} no-underline text-center justify-center" href="/api/cases/${encodeURIComponent(id)}/summary?format=md" target="_blank" rel="noopener">MD</a>
@@ -459,20 +557,55 @@ async function renderCase(id) {
 
       <!-- Metadata -->
       <div class="${Card}">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] mb-4 m-0">Informasi insiden</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-4 m-0">Informasi insiden</h2>
         ${caseMetaHtml(c)}
+      </div>
+
+      <!-- RCA (masuk PDF / HTML / MD export) -->
+      <div class="${Card}">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-1 m-0">Analisis RCA</h2>
+        <p class="text-xs text-[#a9b4c4] mb-4">Semua field di bawah opsional. Yang terisi akan muncul di ekspor MD/HTML/PDF.</p>
+        <div class="space-y-4">
+          <div>
+            <label class="${LB}">Kronologi insiden <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <textarea id="rca-timeline" rows="4" class="${TA}">${esc(rca.incident_timeline)}</textarea>
+          </div>
+          <div class="grid sm:grid-cols-2 gap-4">
+            ${rcaWhyFields}
+          </div>
+          <div>
+            <label class="${LB}">Akar masalah (root cause) <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <textarea id="rca-root" rows="3" class="${TA}">${esc(rca.root_cause)}</textarea>
+          </div>
+          <div>
+            <label class="${LB}">Faktor kontributor <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <textarea id="rca-contrib" rows="3" class="${TA}">${esc(rca.contributing_factors)}</textarea>
+          </div>
+          <div>
+            <label class="${LB}">Tindakan korektif <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <textarea id="rca-corrective" rows="3" class="${TA}">${esc(rca.corrective_actions)}</textarea>
+          </div>
+          <div>
+            <label class="${LB}">Tindakan pencegahan <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <textarea id="rca-preventive" rows="3" class="${TA}">${esc(rca.preventive_actions)}</textarea>
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button type="button" id="saveRca" class="${BtnSm}">Simpan analisis RCA</button>
+          </div>
+          <div id="rcaErr" class="${Err}"></div>
+        </div>
       </div>
 
       ${attHtml ? `
       <div class="${Card}">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] mb-4 m-0">Lampiran</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-4 m-0">Lampiran</h2>
         ${attHtml}
       </div>` : ""}
 
       <!-- SOP Triage -->
       <div class="${Card}">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] mb-1 m-0">Triage SOP</h2>
-        <p class="text-xs text-[#8b98a8] mb-3">Pilih SOP dan terapkan — checklist akan di-reset sesuai prosedur baru.</p>
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-1 m-0">Triage SOP</h2>
+        <p class="text-xs text-[#a9b4c4] mb-3">Pilih SOP dan terapkan — checklist akan di-reset sesuai prosedur baru.</p>
         <div class="flex gap-2">
           <select id="sopPick" class="${SC} text-xs">${sopOpts}</select>
           <button type="button" id="applySop" class="${BtnSm} shrink-0">Terapkan</button>
@@ -483,11 +616,11 @@ async function renderCase(id) {
       <!-- Checklist -->
       <div class="${Card}">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] m-0">Kronologi & checklist</h2>
-          ${steps?.length ? `<span class="text-xs text-[#8b98a8]">${steps.filter(s=>s.done_at).length}/${steps.length} selesai</span>` : ""}
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] m-0">Kronologi & checklist</h2>
+          ${steps?.length ? `<span class="text-xs text-[#a9b4c4]">${steps.filter(s=>s.done_at).length}/${steps.length} selesai</span>` : ""}
         </div>
-        <ol class="list-none p-0 m-0" id="steps">${stepItems || `<li class="text-sm text-[#8b98a8] py-4 text-center">Belum ada langkah — pilih SOP terlebih dahulu.</li>`}</ol>
-        <div class="pt-4 border-t border-[#2a3545] mt-4">
+        <ol class="list-none p-0 m-0" id="steps">${stepItems || `<li class="text-sm text-[#a9b4c4] py-4 text-center">Belum ada langkah — pilih SOP terlebih dahulu.</li>`}</ol>
+        <div class="pt-4 border-t border-[#253041] mt-4">
           <button type="button" id="closeCase" class="${Btn}">Tutup case</button>
           <div id="closeErr" class="${Err}"></div>
         </div>
@@ -495,9 +628,61 @@ async function renderCase(id) {
 
       <!-- Audit -->
       <div class="${Card}">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#8b98a8] mb-4 m-0">Riwayat aktivitas</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-4 m-0">Riwayat aktivitas</h2>
         ${auditHtml}
       </div>`;
+
+    document.getElementById("saveRca").addEventListener("click", async () => {
+      const errEl = document.getElementById("rcaErr");
+      errEl.textContent = "";
+      const body = {
+        incident_timeline: document.getElementById("rca-timeline").value,
+        five_whys: [1, 2, 3, 4, 5].map((n) => document.getElementById(`rca-why-${n}`).value),
+        root_cause: document.getElementById("rca-root").value,
+        contributing_factors: document.getElementById("rca-contrib").value,
+        corrective_actions: document.getElementById("rca-corrective").value,
+        preventive_actions: document.getElementById("rca-preventive").value,
+      };
+      try {
+        await api(`/api/cases/${encodeURIComponent(id)}/rca`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        await renderCase(id);
+      } catch (e) {
+        const msg = typeof e.body === "string" ? e.body : e.body?.error || e.message;
+        errEl.textContent = msg || "Gagal menyimpan";
+      }
+    });
+
+    app.querySelectorAll(".del-case-att").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!(await confirmDialog("Hapus lampiran ini dari case? File akan dihapus permanen."))) return;
+        const attId = btn.getAttribute("data-att-id");
+        try {
+          const res = await fetch(`/api/cases/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attId)}`, { method: "DELETE" });
+          if (!res.ok) throw new Error((await res.text()) || res.statusText);
+          await renderCase(id);
+        } catch (e) {
+          alert(e.message || "Gagal menghapus lampiran");
+        }
+      });
+    });
+
+    app.querySelectorAll(".del-step-att").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!(await confirmDialog("Hapus gambar bukti dari langkah ini?"))) return;
+        const attId = btn.getAttribute("data-att-id");
+        try {
+          const res = await fetch(`/api/cases/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attId)}`, { method: "DELETE" });
+          if (!res.ok) throw new Error((await res.text()) || res.statusText);
+          await renderCase(id);
+        } catch (e) {
+          alert(e.message || "Gagal menghapus gambar");
+        }
+      });
+    });
 
     app.querySelectorAll(".save-step").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -536,12 +721,19 @@ async function renderCase(id) {
         const sid      = li.getAttribute("data-id");
         const progress = li.querySelector(".step-upload-progress");
         progress.classList.remove("hidden");
-        const form = new FormData();
-        form.append("file", inp.files[0]);
+        const files = Array.from(inp.files);
         try {
-          await fetch(`/api/cases/${encodeURIComponent(id)}/steps/${sid}/attachment`, {
-            method: "POST", body: form,
-          });
+          for (const file of files) {
+            const form = new FormData();
+            form.append("file", file);
+            const res = await fetch(`/api/cases/${encodeURIComponent(id)}/steps/${sid}/attachment`, {
+              method: "POST", body: form,
+            });
+            if (!res.ok) {
+              const t = await res.text().catch(() => "");
+              throw new Error(t || res.statusText);
+            }
+          }
           await renderCase(id);
         } catch (e) {
           alert(e.message || "Gagal upload");
@@ -589,16 +781,16 @@ async function renderCase(id) {
 
 // ── SOP Management ────────────────────────────────────────────────────────────
 async function renderSOPs() {
-  app.innerHTML = `<div class="${Card}"><p class="text-sm text-[#8b98a8]">Memuat…</p></div>`;
+  app.innerHTML = `<div class="${Card}"><p class="text-sm text-[#a9b4c4]">Memuat…</p></div>`;
   try {
     const sops = await api("/api/sops");
     const rows = (sops || []).map((s) => `
-      <div class="flex items-center gap-4 py-4 border-t border-[#2a3545] group first:border-0">
+      <div class="flex items-center gap-4 py-4 border-t border-[#253041] group first:border-0">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-0.5">
-            <code class="text-xs font-mono font-semibold text-[#3d8bfd]">${esc(s.slug)}</code>
-            <span class="text-[10px] text-[#8b98a8] bg-[#2a3545] px-1.5 py-0.5 rounded-md font-mono">v${esc(s.version)}</span>
-            ${s.owner ? `<span class="text-[10px] text-[#8b98a8]">· ${esc(s.owner)}</span>` : ""}
+            <code class="text-xs font-mono font-semibold text-[#2563eb]">${esc(s.slug)}</code>
+            <span class="text-[10px] text-[#a9b4c4] bg-[#121a26] border border-[#253041] px-1.5 py-0.5 rounded-md font-mono">v${esc(s.version)}</span>
+            ${s.owner ? `<span class="text-[10px] text-[#a9b4c4]">· ${esc(s.owner)}</span>` : ""}
           </div>
           <p class="text-sm font-medium text-[#e7ecf3] m-0">${esc(s.title)}</p>
         </div>
@@ -613,11 +805,11 @@ async function renderSOPs() {
         <div class="flex items-center justify-between mb-5">
           <div>
             <h2 class="text-base font-semibold text-[#e7ecf3] m-0 mb-1">Kelola SOP</h2>
-            <p class="text-xs text-[#8b98a8] m-0">Buat, edit, atau hapus Standard Operating Procedure.</p>
+            <p class="text-xs text-[#a9b4c4] m-0">Buat, edit, atau hapus Standard Operating Procedure.</p>
           </div>
           <button type="button" id="sopNewBtn" class="${Btn}">+ Tambah SOP</button>
         </div>
-        <div>${rows || `<p class="text-sm text-[#8b98a8] py-4 text-center">Belum ada SOP. Buat yang pertama!</p>`}</div>
+        <div>${rows || `<p class="text-sm text-[#a9b4c4] py-4 text-center">Belum ada SOP. Buat yang pertama!</p>`}</div>
       </div>
       <div id="sopFormArea"></div>`;
 
@@ -655,12 +847,12 @@ async function renderSOPForm(slug) {
 
   area.innerHTML = `
     <div class="${Card}">
-      <h3 class="text-sm font-semibold text-[#e7ecf3] m-0 mb-5">${slug ? `Edit SOP: <code class="text-[#3d8bfd] font-mono">${esc(slug)}</code>` : "SOP Baru"}</h3>
+      <h3 class="text-sm font-semibold text-[#e7ecf3] m-0 mb-5">${slug ? `Edit SOP: <code class="text-[#93c5fd] font-mono">${esc(slug)}</code>` : "SOP Baru"}</h3>
 
       <div class="space-y-4">
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label class="${LB}">Slug <span class="normal-case tracking-normal font-normal text-[#8b98a8]/60">(unik, huruf kecil)</span></label>
+            <label class="${LB}">Slug <span class="normal-case tracking-normal font-normal text-[#a9b4c4]/60">(unik, huruf kecil)</span></label>
             <input id="sopSlug" ${slug ? "readonly class='opacity-60 cursor-not-allowed'" : ""} placeholder="mis. payment-latency"
               value="${esc(existing?.slug || "")}" class="${IC}" />
           </div>
@@ -677,14 +869,14 @@ async function renderSOPForm(slug) {
         <div>
           <div class="flex items-center justify-between mb-2">
             <label class="${LB} mb-0">Langkah-langkah</label>
-            <span class="text-[10px] text-[#8b98a8]">centang = bukti wajib</span>
+            <span class="text-[10px] text-[#a9b4c4]">centang = bukti wajib</span>
           </div>
           <ul id="stepEditor" class="space-y-2 p-0 m-0 list-none">${stepsHtml}</ul>
           <button type="button" id="addStep" class="${BtnGhost} mt-2 text-xs">+ Tambah langkah</button>
         </div>
       </div>
 
-      <div class="flex items-center gap-3 mt-6 pt-5 border-t border-[#2a3545]">
+      <div class="flex items-center gap-3 mt-6 pt-5 border-t border-[#253041]">
         <button type="button" id="sopSave" class="${Btn}">${slug ? "Simpan perubahan" : "Buat SOP"}</button>
         <button type="button" id="sopCancel" class="${BtnGhost}">Batal</button>
       </div>
@@ -738,9 +930,9 @@ async function renderSOPForm(slug) {
 
 function stepEditorRow(title, requiresEvidence) {
   return `<li class="flex gap-2 items-center">
-    <input type="text" class="step-title flex-1 px-3 py-2 bg-[#0c1016] border border-[#2a3545] rounded-lg text-sm text-[#e7ecf3] focus:outline-none focus:border-[#3d8bfd] transition-colors" placeholder="Judul langkah…" value="${esc(title)}" />
-    <label class="flex items-center gap-1.5 text-[10px] font-medium text-[#8b98a8] whitespace-nowrap cursor-pointer select-none">
-      <input type="checkbox" class="step-req accent-[#3d8bfd]" ${requiresEvidence ? "checked" : ""} />
+    <input type="text" class="step-title flex-1 px-3 py-2 bg-[#0f172a] border border-[#253041] rounded-lg text-sm text-[#e7ecf3] placeholder:text-[#7e8aa0] focus:outline-none focus:border-[#60a5fa] transition-colors" placeholder="Judul langkah…" value="${esc(title)}" />
+    <label class="flex items-center gap-1.5 text-[10px] font-medium text-[#a9b4c4] whitespace-nowrap cursor-pointer select-none">
+      <input type="checkbox" class="step-req accent-[#60a5fa]" ${requiresEvidence ? "checked" : ""} />
       bukti?
     </label>
     <button type="button" class="step-remove w-7 h-7 flex items-center justify-center text-[#f07178] bg-[#f07178]/10 hover:bg-[#f07178]/20 rounded-lg text-xs transition-colors border-0 cursor-pointer flex-none">✕</button>
@@ -755,14 +947,21 @@ function attachRemoveStep(btn) {
 }
 
 // ── Form Checker ──────────────────────────────────────────────────────────────
-function attachFormChecker() {
+/** @param {{ getScreensFilled?: () => boolean }} [opts] */
+function attachFormChecker(opts = {}) {
+  const getScreensFilled = typeof opts.getScreensFilled === "function"
+    ? opts.getScreensFilled
+    : () => {
+        const el = document.querySelector(`#f [name="screenshots"]`);
+        return !!(el && el.files && el.files.length);
+      };
+
   const fields = [
-    { name: "title",      label: "Judul",      required: true  },
-    { name: "service",    label: "Layanan",    required: true  },
-    { name: "severity",   label: "Severity",   required: true  },
-    { name: "reporter",   label: "Pelapor",    required: true  },
-    { name: "summary",    label: "Ringkasan",  required: false },
-    { name: "screenshot", label: "Screenshot", required: false },
+    { name: "title",    label: "Judul",     required: true  },
+    { name: "service",  label: "Layanan",   required: false },
+    { name: "severity", label: "Severity",  required: false },
+    { name: "reporter", label: "Pelapor",   required: false },
+    { name: "summary",  label: "Ringkasan", required: false },
   ];
 
   function isFilled(el) {
@@ -789,15 +988,30 @@ function attachFormChecker() {
         if (required) missing.push(label);
       }
     });
+
+    const ssOk = getScreensFilled();
+    const ssStatus = document.getElementById("fst-screenshots");
+    if (ssStatus) {
+      if (ssOk) {
+        filledCount++;
+        ssStatus.textContent = "✓";
+        ssStatus.className   = "field-status ok";
+      } else {
+        ssStatus.textContent = "○";
+        ssStatus.className   = "field-status empty";
+      }
+    }
+
+    const totalSlots = fields.length + 1;
     saveDraft();
     const statusDiv = document.getElementById("form-checker-status");
     if (!statusDiv) return;
-    if (missing.length === 0 && filledCount === fields.length) {
+    if (missing.length === 0 && filledCount === totalSlots) {
       statusDiv.className   = "form-checker all-ok";
       statusDiv.textContent = "✓ Semua field terisi — form siap dikirim";
     } else if (missing.length === 0) {
       statusDiv.className   = "form-checker partial-ok";
-      statusDiv.textContent = `✓ Field wajib sudah diisi (${filledCount}/${fields.length} field terisi)`;
+      statusDiv.textContent = `✓ Field wajib lengkap (${filledCount}/${totalSlots} slot terisi, termasuk gambar opsional)`;
     } else {
       statusDiv.className   = "form-checker has-warn";
       statusDiv.textContent = `⚠ Belum diisi: ${missing.join(", ")}`;

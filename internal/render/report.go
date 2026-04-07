@@ -54,6 +54,31 @@ func buildCaseText(c *store.Case, steps []store.CaseStep) string {
 	if c.SOPSlug != "" {
 		b.WriteString(fmt.Sprintf("SOP: %s — %s\n", c.SOPSlug, c.SOPTitle))
 	}
+	rca := store.ParseCaseRCAJSON(c.RCAJSON)
+	if rca.HasContent() {
+		rca = rca.Normalize()
+		b.WriteString("\n--- Analisis RCA (dari form) ---\n")
+		if strings.TrimSpace(rca.IncidentTimeline) != "" {
+			b.WriteString("Kronologi insiden:\n" + rca.IncidentTimeline + "\n")
+		}
+		for i, w := range rca.FiveWhys {
+			if strings.TrimSpace(w) != "" {
+				b.WriteString(fmt.Sprintf("Why %d: %s\n", i+1, strings.TrimSpace(w)))
+			}
+		}
+		if strings.TrimSpace(rca.RootCause) != "" {
+			b.WriteString("Akar masalah: " + rca.RootCause + "\n")
+		}
+		if strings.TrimSpace(rca.ContributingFactors) != "" {
+			b.WriteString("Faktor kontributor: " + rca.ContributingFactors + "\n")
+		}
+		if strings.TrimSpace(rca.CorrectiveActions) != "" {
+			b.WriteString("Tindakan korektif: " + rca.CorrectiveActions + "\n")
+		}
+		if strings.TrimSpace(rca.PreventiveActions) != "" {
+			b.WriteString("Tindakan pencegahan: " + rca.PreventiveActions + "\n")
+		}
+	}
 	b.WriteString("\nLangkah-langkah checklist:\n")
 	for _, st := range steps {
 		status := "belum selesai"
@@ -239,6 +264,7 @@ func templateFinalReport(c *store.Case, steps []store.CaseStep) string {
 	} else {
 		b.WriteString("Investigasi dilakukan mengikuti langkah-langkah checklist SOP.\n")
 	}
+	appendTemplateRCA(&b, c)
 	b.WriteString("\n")
 
 	// 5. Tindakan Mitigasi
@@ -284,7 +310,12 @@ func templateFinalReport(c *store.Case, steps []store.CaseStep) string {
 
 	// 8. Dugaan Penyebab
 	b.WriteString("### 8. Dugaan Penyebab Sementara\n")
-	b.WriteString("Berdasarkan evidence yang tersedia, investigasi masih dalam proses untuk mengidentifikasi root cause secara definitif. Catatan ini bersifat indikatif.\n\n")
+	rca := store.ParseCaseRCAJSON(c.RCAJSON)
+	if strings.TrimSpace(rca.RootCause) != "" {
+		b.WriteString(rca.RootCause + "\n\n")
+	} else {
+		b.WriteString("Berdasarkan evidence yang tersedia, investigasi masih dalam proses untuk mengidentifikasi root cause secara definitif. Catatan ini bersifat indikatif.\n\n")
+	}
 
 	// 9. Rekomendasi
 	b.WriteString("### 9. Rekomendasi Tindak Lanjut\n")
@@ -294,4 +325,30 @@ func templateFinalReport(c *store.Case, steps []store.CaseStep) string {
 	b.WriteString("- Dokumentasikan temuan ke dalam backlog atau issue tracker jika diperlukan.\n")
 
 	return b.String()
+}
+
+func appendTemplateRCA(b *strings.Builder, c *store.Case) {
+	rca := store.ParseCaseRCAJSON(c.RCAJSON)
+	if !rca.HasContent() {
+		return
+	}
+	rca = rca.Normalize()
+	b.WriteString("\n**Ringkasan analisis RCA (form):**\n\n")
+	if strings.TrimSpace(rca.IncidentTimeline) != "" {
+		b.WriteString("- **Kronologi**: " + strings.TrimSpace(rca.IncidentTimeline) + "\n")
+	}
+	for i, w := range rca.FiveWhys {
+		if strings.TrimSpace(w) != "" {
+			b.WriteString(fmt.Sprintf("- **Why %d**: %s\n", i+1, strings.TrimSpace(w)))
+		}
+	}
+	if strings.TrimSpace(rca.ContributingFactors) != "" {
+		b.WriteString("- **Faktor kontributor**: " + strings.TrimSpace(rca.ContributingFactors) + "\n")
+	}
+	if strings.TrimSpace(rca.CorrectiveActions) != "" {
+		b.WriteString("- **Tindakan korektif**: " + strings.TrimSpace(rca.CorrectiveActions) + "\n")
+	}
+	if strings.TrimSpace(rca.PreventiveActions) != "" {
+		b.WriteString("- **Tindakan pencegahan**: " + strings.TrimSpace(rca.PreventiveActions) + "\n")
+	}
 }

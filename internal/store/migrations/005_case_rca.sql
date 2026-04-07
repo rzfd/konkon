@@ -1,0 +1,1 @@
+ALTER TABLE cases ADD COLUMN rca_json TEXT;

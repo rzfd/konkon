@@ -197,6 +197,15 @@ func (s *Store) UpdateCaseSOP(ctx context.Context, caseID string, sopID int64, s
 	return err
 }
 
+// UpdateCaseRCA replaces rca_json for a case.
+func (s *Store) UpdateCaseRCA(ctx context.Context, caseID, rcaJSON string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.execContext(ctx,
+		`UPDATE cases SET rca_json = ?, updated_at = ? WHERE case_id = ?`,
+		rcaJSON, now, caseID)
+	return err
+}
+
 // UpdateCaseStatus updates status and optional resolved_at.
 func (s *Store) UpdateCaseStatus(ctx context.Context, caseID, status string, resolved *time.Time) error {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -313,7 +322,7 @@ func (s *Store) ListCases(ctx context.Context, f CaseFilter) ([]Case, error) {
 func (s *Store) GetCase(ctx context.Context, caseID string) (*Case, error) {
 	row := s.queryRowContext(ctx, `
 		SELECT c.case_id, c.title, c.summary, c.service, c.severity, c.status, c.sop_id, c.sop_version, c.reporter,
-			c.created_at, c.updated_at, c.resolved_at, COALESCE(s.slug,''), COALESCE(s.title,'')
+			c.created_at, c.updated_at, c.resolved_at, COALESCE(c.rca_json,''), COALESCE(s.slug,''), COALESCE(s.title,'')
 		FROM cases c
 		LEFT JOIN sop s ON s.id = c.sop_id
 		WHERE c.case_id = ?`, caseID)
@@ -324,7 +333,7 @@ func (s *Store) GetCase(ctx context.Context, caseID string) (*Case, error) {
 	var resolved sql.NullString
 	var created, updated string
 	if err := row.Scan(&c.CaseID, &c.Title, &summary, &service, &severity, &c.Status, &sopID, &sopVer, &reporter,
-		&created, &updated, &resolved, &c.SOPSlug, &c.SOPTitle); err != nil {
+		&created, &updated, &resolved, &c.RCAJSON, &c.SOPSlug, &c.SOPTitle); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -618,6 +627,13 @@ func (s *Store) ListStepAttachmentsForCase(ctx context.Context, caseID string) (
 		out[stepID] = append(out[stepID], a)
 	}
 	return out, rows.Err()
+}
+
+// DeleteAttachment removes a row from case_attachment (case-level or step-level).
+func (s *Store) DeleteAttachment(ctx context.Context, caseID string, attID int64) error {
+	_, err := s.execContext(ctx,
+		`DELETE FROM case_attachment WHERE id = ? AND case_id = ?`, attID, caseID)
+	return err
 }
 
 // GetAttachmentByID returns any attachment by id scoped to a case.
