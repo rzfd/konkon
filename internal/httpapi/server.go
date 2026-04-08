@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/rzfd/metatech/konkon/internal/automation"
 	"github.com/rzfd/metatech/konkon/internal/render"
 	"github.com/rzfd/metatech/konkon/internal/sop"
 	"github.com/rzfd/metatech/konkon/internal/store"
@@ -78,6 +79,7 @@ type Server struct {
 	store        *store.Store
 	uploadRoot   string
 	anthropicKey string
+	rcaGen       *automation.Generator
 	rl           *rateLimiter
 }
 
@@ -86,7 +88,14 @@ func New(logger *slog.Logger, st *store.Store, uploadRoot string, anthropicKey s
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{log: logger, store: st, uploadRoot: uploadRoot, anthropicKey: anthropicKey, rl: newRateLimiter()}
+	return &Server{
+		log:          logger,
+		store:        st,
+		uploadRoot:   uploadRoot,
+		anthropicKey: anthropicKey,
+		rcaGen:       automation.NewGenerator(anthropicKey),
+		rl:           newRateLimiter(),
+	}
 }
 
 // limited wraps a handler with IP-based rate limiting (60 req/min).
@@ -127,6 +136,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/cases/{caseId}/steps/{stepId}", s.limited(s.handlePatchStep))
 	mux.HandleFunc("POST /api/cases/{id}/close", s.limited(s.handleCloseCase))
 	mux.HandleFunc("GET /api/cases/{id}/summary", s.handleSummary)
+	mux.HandleFunc("POST /api/cases/{id}/rca/draft", s.limited(s.handleGenerateRCADraft))
 	mux.HandleFunc("PATCH /api/cases/{id}/rca", s.limited(s.handlePatchRCA))
 	mux.HandleFunc("GET /api/cases/{id}/report", s.handleFinalReport)
 	mux.HandleFunc("GET /api/cases/{id}/attachments", s.handleListAttachments)
@@ -688,6 +698,67 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 
 const maxRCAFieldRunes = 8000
 
+func (s *Server) handleGenerateRCADraft(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ctx := r.Context()
+
+	c, err := s.store.GetCase(ctx, id)
+	if err != nil || c == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	steps, err := s.store.ListSteps(ctx, id)
+	if err != nil {
+		s.log.Error("list steps for rca draft", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	audit, err := s.store.ListAudit(ctx, id)
+	if err != nil {
+		s.log.Error("list audit for rca draft", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	attachments, err := s.store.ListAttachments(ctx, id)
+	if err != nil {
+		s.log.Error("list attachments for rca draft", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	stepAtts, err := s.store.ListStepAttachmentsForCase(ctx, id)
+	if err != nil {
+		s.log.Error("list step attachments for rca draft", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	draft, err := s.rcaGen.Generate(ctx, automation.Input{
+		Case:            c,
+		Steps:           steps,
+		Audit:           audit,
+		Attachments:     attachments,
+		StepAttachments: stepAtts,
+	})
+	if err != nil {
+		s.log.Error("generate rca draft", "err", err, "case_id", id)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	detail := "source=" + draft.Source
+	if draft.Confidence != "" {
+		detail += " confidence=" + draft.Confidence
+	}
+	_ = s.store.LogAudit(ctx, id, "", "rca_draft_generated", detail)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rca":        rcaToJSON(draft.RCA),
+		"source":     draft.Source,
+		"confidence": draft.Confidence,
+		"notes":      draft.Notes,
+	})
+}
+
 func (s *Server) handlePatchRCA(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body store.CaseRCA
@@ -705,11 +776,16 @@ func (s *Server) handlePatchRCA(w http.ResponseWriter, r *http.Request) {
 	}
 	if !check(body.IncidentTimeline, "kronologi") || !check(body.RootCause, "akar masalah") ||
 		!check(body.ContributingFactors, "faktor kontributor") || !check(body.CorrectiveActions, "tindakan korektif") ||
-		!check(body.PreventiveActions, "tindakan pencegahan") {
+		!check(body.PreventiveActions, "tindakan pencegahan") || !check(body.DetectionGap, "celah deteksi") {
 		return
 	}
 	for i, w := range body.FiveWhys {
 		if !check(w, "5 whys #"+strconv.Itoa(i+1)) {
+			return
+		}
+	}
+	for i, it := range body.ActionItems {
+		if !check(it, "action item #"+strconv.Itoa(i+1)) {
 			return
 		}
 	}
@@ -950,19 +1026,23 @@ func caseToJSON(c store.Case) map[string]any {
 	if c.ResolvedAt != nil {
 		m["resolved_at"] = tz.FormatRFC3339(*c.ResolvedAt)
 	}
-	rca := store.ParseCaseRCAJSON(c.RCAJSON)
-	rca = rca.Normalize()
-	m["rca"] = map[string]any{
-		"incident_timeline":     rca.IncidentTimeline,
-		"five_whys":             rca.FiveWhys,
-		"root_cause":            rca.RootCause,
-		"contributing_factors":  rca.ContributingFactors,
-		"corrective_actions":    rca.CorrectiveActions,
-		"preventive_actions":    rca.PreventiveActions,
-	}
+	m["rca"] = rcaToJSON(store.ParseCaseRCAJSON(c.RCAJSON))
 	return m
 }
 
+func rcaToJSON(rca store.CaseRCA) map[string]any {
+	rca = rca.Normalize()
+	return map[string]any{
+		"incident_timeline":    rca.IncidentTimeline,
+		"five_whys":            rca.FiveWhys,
+		"root_cause":           rca.RootCause,
+		"contributing_factors": rca.ContributingFactors,
+		"corrective_actions":   rca.CorrectiveActions,
+		"preventive_actions":   rca.PreventiveActions,
+		"action_items":         rca.ActionItems,
+		"detection_gap":        rca.DetectionGap,
+	}
+}
 
 func stepsWithAttachmentsToJSON(steps []store.CaseStep, stepAtts map[int64][]store.CaseAttachment, caseID string) []any {
 	out := make([]any, 0, len(steps))

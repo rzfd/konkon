@@ -71,14 +71,16 @@ function actionColor(action) {
     step_done:    "bg-emerald-400/10 text-emerald-200",
     step_undone:  "bg-slate-400/10 text-slate-200",
     case_closed:  "bg-amber-400/10 text-amber-200",
+    rca_updated:  "bg-cyan-400/10 text-cyan-200",
+    rca_draft_generated: "bg-indigo-400/10 text-indigo-200",
   };
   return map[action] || "bg-slate-400/10 text-slate-200";
 }
 
 function normalizeRca(rca) {
   const r = rca && typeof rca === "object" ? rca : {};
-  const whys = Array.isArray(r.five_whys) ? r.five_whys.slice(0, 5) : [];
-  while (whys.length < 5) whys.push("");
+  const whys = (Array.isArray(r.five_whys) ? r.five_whys : []).map((v) => String(v ?? "")).filter((v) => v.trim()).slice(0, 12);
+  const actionItems = (Array.isArray(r.action_items) ? r.action_items : []).map((v) => String(v ?? "")).filter((v) => v.trim()).slice(0, 12);
   return {
     incident_timeline: r.incident_timeline || "",
     five_whys: whys,
@@ -86,18 +88,215 @@ function normalizeRca(rca) {
     contributing_factors: r.contributing_factors || "",
     corrective_actions: r.corrective_actions || "",
     preventive_actions: r.preventive_actions || "",
+    action_items: actionItems,
+    detection_gap: r.detection_gap || "",
   };
+}
+
+function normalizeIncidentTimeline(raw) {
+  const lines = String(raw ?? "").split("\n");
+  const out = [];
+  const oldFmt = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?\s*(?:WIB)?\s*[—-]\s*(.+)$/i;
+  const newFmt = /^(\d{6})\s+(\d{2}):(\d{2}):(\d{2})\s*\|\s*(.+)$/;
+  for (const ln of lines) {
+    const s = ln.trim();
+    if (!s) continue;
+    const mNew = s.match(newFmt);
+    if (mNew) {
+      out.push(`${mNew[1]} ${mNew[2]}:${mNew[3]}:${mNew[4]} | ${mNew[5].trim()}`);
+      continue;
+    }
+    const mOld = s.match(oldFmt);
+    if (mOld) {
+      const yy = mOld[1].slice(2);
+      const mm = mOld[2];
+      const dd = mOld[3];
+      const hh = mOld[4];
+      const mi = mOld[5];
+      const ss = mOld[6] || "00";
+      out.push(`${dd}${mm}${yy} ${hh}:${mi}:${ss} | ${mOld[7].trim()}`);
+      continue;
+    }
+    // Keep unknown free-form lines, but still force single-space around the separator when present.
+    if (s.includes("|")) {
+      const [left, ...rest] = s.split("|");
+      out.push(`${left.trim()} | ${rest.join("|").trim()}`);
+    } else {
+      out.push(s);
+    }
+  }
+  return out.join("\n");
+}
+
+function ymdToDdMmYy(ymd) {
+  const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  return `${m[3]}${m[2]}${m[1].slice(2)}`;
+}
+
+function ddMmYyToYmd(ddmmyy) {
+  const m = String(ddmmyy || "").match(/^(\d{2})(\d{2})(\d{2})$/);
+  if (!m) return "";
+  return `20${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function parseTimelineEntries(raw) {
+  const normalized = normalizeIncidentTimeline(raw);
+  const lines = normalized ? normalized.split("\n") : [];
+  const entries = [];
+  const re = /^(\d{6})\s+(\d{2}):(\d{2}):(\d{2})\s*\|\s*(.+)$/;
+  for (const line of lines) {
+    const m = line.trim().match(re);
+    if (!m) continue;
+    entries.push({
+      date: ddMmYyToYmd(m[1]),
+      time: `${m[2]}:${m[3]}:${m[4]}`,
+      detail: m[5].trim(),
+    });
+  }
+  return entries;
+}
+
+function timelineEntryRow(entry = {}) {
+  return `<div class="timeline-row grid sm:grid-cols-[150px_130px_1fr_auto] gap-2 items-start">
+      <input type="date" class="${IC} text-xs timeline-date" value="${esc(entry.date || "")}" />
+      <input type="time" step="1" class="${IC} text-xs timeline-time" value="${esc(entry.time || "")}" />
+      <input type="text" class="${IC} text-xs timeline-detail" placeholder="detail kejadian" value="${esc(entry.detail || "")}" />
+      <button type="button" class="timeline-del ${BtnGhost} text-xs mt-0.5">Hapus</button>
+    </div>`;
+}
+
+function timelineFromRows() {
+  const rows = [...document.querySelectorAll(".timeline-row")];
+  const out = [];
+  for (const row of rows) {
+    const date = row.querySelector(".timeline-date")?.value || "";
+    const time = row.querySelector(".timeline-time")?.value || "";
+    const detail = (row.querySelector(".timeline-detail")?.value || "").trim();
+    if (!date && !time && !detail) continue;
+    if (!date || !time || !detail) continue;
+    const ddmmyy = ymdToDdMmYy(date);
+    if (!ddmmyy) continue;
+    const hhmmss = time.length === 5 ? `${time}:00` : time;
+    out.push(`${ddmmyy} ${hhmmss} | ${detail}`);
+  }
+  return out.join("\n");
+}
+
+function bindTimelineEditor(rawTimeline) {
+  const host = document.getElementById("timelineRows");
+  const addBtn = document.getElementById("addTimelineRow");
+  if (!host || !addBtn) return;
+
+  const addRow = (entry = {}) => {
+    host.insertAdjacentHTML("beforeend", timelineEntryRow(entry));
+    const row = host.lastElementChild;
+    row?.querySelector(".timeline-del")?.addEventListener("click", () => row.remove());
+  };
+
+  const entries = parseTimelineEntries(rawTimeline);
+  if (entries.length) {
+    entries.forEach((e) => addRow(e));
+  } else {
+    addRow({});
+  }
+  addBtn.onclick = () => addRow({});
 }
 
 function rcaPayloadFromDom() {
   return {
-    incident_timeline: document.getElementById("rca-timeline")?.value ?? "",
-    five_whys: [1, 2, 3, 4, 5].map((n) => document.getElementById(`rca-why-${n}`)?.value ?? ""),
+    incident_timeline: timelineFromRows(),
+    five_whys: [...document.querySelectorAll(".rca-why-item")].map((el) => el.value ?? "").filter((s) => String(s).trim()),
     root_cause: document.getElementById("rca-root")?.value ?? "",
     contributing_factors: document.getElementById("rca-contrib")?.value ?? "",
     corrective_actions: document.getElementById("rca-corrective")?.value ?? "",
     preventive_actions: document.getElementById("rca-preventive")?.value ?? "",
+    action_items: [...document.querySelectorAll(".rca-action-item")].map((el) => el.value ?? "").filter((s) => String(s).trim()),
+    detection_gap: document.getElementById("rca-detect-gap")?.value ?? "",
   };
+}
+
+function whyRowHtml(value = "") {
+  return `<div class="rca-why-row flex gap-3 items-start">
+      <div class="mt-2 w-6 h-6 rounded-full bg-[#121a26] border border-[#253041] text-[#a9b4c4] text-xs font-bold flex items-center justify-center shrink-0">*</div>
+      <div class="flex-1">
+        <label class="${LB}">Analisis <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+        <textarea rows="2" class="rca-why-item ${TA} min-h-[52px]">${esc(value)}</textarea>
+      </div>
+      <button type="button" class="del-why-row ${BtnDanger} text-xs mt-8">Hapus</button>
+    </div>`;
+}
+
+function actionRowHtml(value = "") {
+  return `<div class="rca-action-row grid sm:grid-cols-[1fr_auto] gap-2 items-start">
+      <input type="text" class="rca-action-item ${IC} text-xs" placeholder="tulis action item" value="${esc(value)}" />
+      <button type="button" class="del-action-row ${BtnDanger} text-xs">Hapus</button>
+    </div>`;
+}
+
+function bindRcaDynamicRows(rca) {
+  const whyHost = document.getElementById("whyRows");
+  const actionHost = document.getElementById("actionRows");
+  const addWhy = document.getElementById("addWhyRow");
+  const addAction = document.getElementById("addActionRow");
+  if (!whyHost || !actionHost || !addWhy || !addAction) return;
+
+  const whys = (rca?.five_whys || []).slice(0, 12);
+  const actions = (rca?.action_items || []).slice(0, 12);
+  whyHost.innerHTML = (whys.length ? whys : [""]).map((v) => whyRowHtml(v)).join("");
+  actionHost.innerHTML = (actions.length ? actions : [""]).map((v) => actionRowHtml(v)).join("");
+
+  const bindDelete = () => {
+    whyHost.querySelectorAll(".del-why-row").forEach((btn) => {
+      btn.onclick = () => {
+        btn.closest(".rca-why-row")?.remove();
+        if (!whyHost.querySelector(".rca-why-row")) whyHost.insertAdjacentHTML("beforeend", whyRowHtml(""));
+      };
+    });
+    actionHost.querySelectorAll(".del-action-row").forEach((btn) => {
+      btn.onclick = () => {
+        btn.closest(".rca-action-row")?.remove();
+        if (!actionHost.querySelector(".rca-action-row")) actionHost.insertAdjacentHTML("beforeend", actionRowHtml(""));
+        bindDelete();
+      };
+    });
+  };
+  bindDelete();
+
+  addWhy.onclick = () => {
+    if (whyHost.querySelectorAll(".rca-why-row").length >= 12) return;
+    whyHost.insertAdjacentHTML("beforeend", whyRowHtml(""));
+    bindDelete();
+  };
+  addAction.onclick = () => {
+    if (actionHost.querySelectorAll(".rca-action-row").length >= 12) return;
+    actionHost.insertAdjacentHTML("beforeend", actionRowHtml(""));
+    bindDelete();
+  };
+}
+
+function applyRcaDraftToDom(draft) {
+  const next = normalizeRca(draft);
+  const current = normalizeRca(rcaPayloadFromDom());
+  const keep = (value, fallback) => String(value || "").trim() ? value : (fallback || "");
+
+  document.getElementById("rca-root").value = keep(current.root_cause, next.root_cause);
+  document.getElementById("rca-contrib").value = keep(current.contributing_factors, next.contributing_factors);
+  document.getElementById("rca-corrective").value = keep(current.corrective_actions, next.corrective_actions);
+  document.getElementById("rca-preventive").value = keep(current.preventive_actions, next.preventive_actions);
+  document.getElementById("rca-detect-gap").value = keep(current.detection_gap, next.detection_gap);
+  const timelineHost = document.getElementById("timelineRows");
+  if (timelineHost) {
+    timelineHost.innerHTML = "";
+    bindTimelineEditor(keep(current.incident_timeline, next.incident_timeline));
+  }
+
+  const currentWhys = [...document.querySelectorAll(".rca-why-item")].map((el) => el.value || "").filter((v) => v.trim());
+  const currentActions = [...document.querySelectorAll(".rca-action-item")].map((el) => el.value || "").filter((v) => v.trim());
+  bindRcaDynamicRows({
+    five_whys: currentWhys.length ? currentWhys : next.five_whys,
+    action_items: currentActions.length ? currentActions : next.action_items,
+  });
 }
 
 async function flushChecklistFieldsToServer(caseId) {
@@ -557,11 +756,6 @@ async function renderCase(id) {
     }).join("");
 
     const rca = normalizeRca(c.rca);
-    const rcaWhyFields = [1, 2, 3, 4, 5].map((n) => `
-        <div>
-          <label class="${LB}">Why ${n} <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
-          <textarea id="rca-why-${n}" rows="2" class="${TA} min-h-[52px]">${esc(rca.five_whys[n - 1])}</textarea>
-        </div>`).join("");
 
     const auditHtml = (audit || []).length
       ? `<div class="space-y-3">
@@ -614,34 +808,51 @@ async function renderCase(id) {
       <!-- RCA (masuk PDF / HTML / MD export) -->
       <div class="${Card}">
         <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-1 m-0">Analisis RCA</h2>
-        <p class="text-xs text-[#a9b4c4] mb-4">Semua field di bawah opsional. Tombol MD/HTML/PDF menyimpan dulu isian RCA dan field checklist (URL bukti, catatan, diselesaikan oleh) ke server, lalu membuka ekspor. Field RCA kosong tetap tampil di PDF sebagai placeholder.</p>
+        <p class="text-xs text-[#a9b4c4] mb-4">Format mengikuti template <span class="font-mono">RCA_SAFARI_AUTH</span>: Root cause → Timeline → Temuan utama → Perbaikan → Pencegahan/tindak lanjut → Action items → Celah deteksi. Bagian “bukti perilaku sesi” tidak ada. Tombol MD/HTML/PDF menyimpan dulu isian ke server lalu membuka ekspor.</p>
         <div class="space-y-4">
           <div>
-            <label class="${LB}">Kronologi insiden <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
-            <textarea id="rca-timeline" rows="4" class="${TA}">${esc(rca.incident_timeline)}</textarea>
-          </div>
-          <div class="grid sm:grid-cols-2 gap-4">
-            ${rcaWhyFields}
-          </div>
-          <div>
-            <label class="${LB}">Akar masalah (root cause) <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <label class="${LB}">Root cause <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
             <textarea id="rca-root" rows="3" class="${TA}">${esc(rca.root_cause)}</textarea>
           </div>
           <div>
-            <label class="${LB}">Faktor kontributor <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <label class="${LB}">Timeline insiden <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <div id="timelineRows" class="space-y-2"></div>
+            <div class="pt-1">
+              <button type="button" id="addTimelineRow" class="${BtnGhost} text-xs">+ Tambah kejadian</button>
+            </div>
+            <p class="text-[11px] text-[#a9b4c4] mt-2 mb-0">Isi via kalender + jam. Sistem akan simpan sebagai <span class="font-mono">ddmmyy hh:mm:ss | detail kejadian</span>.</p>
+          </div>
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] m-0">Analisis (opsional)</h3>
+            <div id="whyRows" class="space-y-3"></div>
+            <button type="button" id="addWhyRow" class="${BtnGhost} text-xs">+ Tambah analisis</button>
+          </div>
+          <div>
+            <label class="${LB}">Temuan utama <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
             <textarea id="rca-contrib" rows="3" class="${TA}">${esc(rca.contributing_factors)}</textarea>
           </div>
           <div>
-            <label class="${LB}">Tindakan korektif <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <label class="${LB}">Perbaikan yang diterapkan <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
             <textarea id="rca-corrective" rows="3" class="${TA}">${esc(rca.corrective_actions)}</textarea>
           </div>
           <div>
-            <label class="${LB}">Tindakan pencegahan <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <label class="${LB}">Pencegahan & tindak lanjut <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
             <textarea id="rca-preventive" rows="3" class="${TA}">${esc(rca.preventive_actions)}</textarea>
           </div>
+          <div class="space-y-2">
+            <label class="${LB}">Action items <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <div id="actionRows" class="space-y-2"></div>
+            <button type="button" id="addActionRow" class="${BtnGhost} text-xs">+ Tambah actions</button>
+          </div>
+          <div>
+            <label class="${LB}">Celah deteksi <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
+            <textarea id="rca-detect-gap" rows="3" class="${TA}">${esc(rca.detection_gap)}</textarea>
+          </div>
           <div class="flex gap-2 pt-1">
+            <button type="button" id="generateRca" class="${BtnGhost}">Generate draft RCA</button>
             <button type="button" id="saveRca" class="${BtnSm}">Simpan analisis RCA</button>
           </div>
+          <div id="rcaMsg" class="text-[#a9b4c4] text-xs mt-2 min-h-[1rem]"></div>
           <div id="rcaErr" class="${Err}"></div>
         </div>
       </div>
@@ -663,18 +874,7 @@ async function renderCase(id) {
         <div id="sopErr" class="${Err}"></div>
       </div>
 
-      <!-- Checklist -->
-      <div class="${Card}">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] m-0">Kronologi & checklist</h2>
-          ${steps?.length ? `<span class="text-xs text-[#a9b4c4]">${steps.filter(s=>s.done_at).length}/${steps.length} selesai</span>` : ""}
-        </div>
-        <ol class="list-none p-0 m-0" id="steps">${stepItems || `<li class="text-sm text-[#a9b4c4] py-4 text-center">Belum ada langkah — pilih SOP terlebih dahulu.</li>`}</ol>
-        <div class="pt-4 border-t border-[#253041] mt-4">
-          <button type="button" id="closeCase" class="${Btn}">Tutup case</button>
-          <div id="closeErr" class="${Err}"></div>
-        </div>
-      </div>
+      <!-- Checklist intentionally hidden -->
 
       <!-- Audit -->
       <div class="${Card}">
@@ -682,13 +882,18 @@ async function renderCase(id) {
         ${auditHtml}
       </div>`;
 
+    bindTimelineEditor(rca.incident_timeline);
+    bindRcaDynamicRows(rca);
+
     app.querySelectorAll(".case-export-btn").forEach((btn) => {
       btn.addEventListener("click", () => exportCaseSummary(id, btn.getAttribute("data-format") || "pdf"));
     });
 
     document.getElementById("saveRca").addEventListener("click", async () => {
       const errEl = document.getElementById("rcaErr");
+      const msgEl = document.getElementById("rcaMsg");
       errEl.textContent = "";
+      msgEl.textContent = "";
       const body = rcaPayloadFromDom();
       try {
         await api(`/api/cases/${encodeURIComponent(id)}/rca`, {
@@ -700,6 +905,31 @@ async function renderCase(id) {
       } catch (e) {
         const msg = typeof e.body === "string" ? e.body : e.body?.error || e.message;
         errEl.textContent = msg || "Gagal menyimpan";
+      }
+    });
+
+    document.getElementById("generateRca").addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget;
+      const errEl = document.getElementById("rcaErr");
+      const msgEl = document.getElementById("rcaMsg");
+      errEl.textContent = "";
+      msgEl.textContent = "";
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Menyusun draft…";
+      try {
+        await flushChecklistFieldsToServer(id);
+        const out = await api(`/api/cases/${encodeURIComponent(id)}/rca/draft`, { method: "POST" });
+        applyRcaDraftToDom(out?.rca || {});
+        const source = out?.source || "heuristic";
+        const confidence = out?.confidence ? ` (${out.confidence})` : "";
+        msgEl.textContent = `Draft RCA ditambahkan dari ${source}${confidence}. Field yang sudah terisi tidak diubah; review lalu simpan.`;
+      } catch (e) {
+        const msg = typeof e.body === "string" ? e.body : e.body?.error || e.message;
+        errEl.textContent = msg || "Gagal membuat draft RCA";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
       }
     });
 

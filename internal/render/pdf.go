@@ -193,32 +193,16 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 	}
 	pdf.SetY(cardY + cardInnerH + 2)
 
-	if len(attachments) > 0 {
-		sectionHeader(pdf, "LAMPIRAN")
-		for _, att := range attachments {
-			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(att.FilePath), "."))
-			if ext != "jpg" && ext != "jpeg" && ext != "png" && ext != "gif" {
-				continue
-			}
-			fullPath := filepath.Join(uploadRoot, filepath.FromSlash(att.FilePath))
-			pdf.SetFont("Helvetica", "I", 8)
-			pdf.SetTextColor(textMidR, textMidG, textMidB)
-			pdf.SetX(marginL)
-			pdf.CellFormat(contentW, 5, tr(att.OriginalName), "", 1, "L", false, 0, "")
-			pdf.Ln(1)
-			if !drawLampiranImage(pdf, tr, fullPath, ext) {
-				pdf.SetFont("Helvetica", "I", 8)
-				pdf.SetTextColor(textDimR, textDimG, textDimB)
-				pdf.SetX(marginL)
-				pdf.MultiCell(contentW, 4, tr("(Gagal memuat gambar)"), "", "L", false)
-				pdf.Ln(2)
-			}
-			pdf.Ln(2)
-		}
+	// ── GAMBAR DAMPAK (ikut template RCA_SAFARI_AUTH) ──────────────────────────
+	if first := firstImageAttachment(attachments); first != nil {
+		sectionHeader(pdf, "GAMBAR DAMPAK")
+		fullPath := filepath.Join(uploadRoot, filepath.FromSlash(first.FilePath))
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(first.FilePath), "."))
+		_ = drawLampiranImage(pdf, tr, fullPath, ext)
 	}
 
 	if c.Summary != "" {
-		sectionHeader(pdf, "RINGKASAN EKSEKUTIF")
+		sectionHeader(pdf, "RINGKASAN")
 		pdf.SetX(marginL)
 		pdf.SetFont("Helvetica", "", rcaBodyFontPt)
 		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
@@ -243,29 +227,9 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 		pdf.Ln(3)
 	}
 
-	if opts.IncludeChecklist && len(steps) > 0 {
-		sectionHeader(pdf, "KRONOLOGI & CHECKLIST")
-		if opts.IncludeChecklistProgress {
-			done := 0
-			for _, st := range steps {
-				if st.DoneAt != nil {
-					done++
-				}
-			}
-			barY := pdf.GetY()
-			pdf.SetFillColor(226, 232, 240)
-			pdf.Rect(marginL, barY, contentW, progressBarH, "F")
-			pct := float64(done) / float64(len(steps))
-			pdf.SetFillColor(greenR, greenG, greenB)
-			pdf.Rect(marginL, barY, contentW*pct, progressBarH, "F")
-			pdf.SetXY(marginL, barY+progressBarH+1)
-			pdf.SetFont("Helvetica", "I", 7)
-			pdf.SetTextColor(textMidR, textMidG, textMidB)
-			pdf.CellFormat(contentW, 4, fmt.Sprintf("%d dari %d langkah selesai", done, len(steps)), "", 1, "R", false, 0, "")
-			pdf.Ln(afterProgressLn)
-		}
-		drawChecklist(pdf, tr, steps, stepAtts, uploadRoot)
-	}
+	_ = steps
+	_ = stepAtts
+	_ = opts
 
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
@@ -470,63 +434,103 @@ func drawRootCauseBox(pdf *fpdf.Fpdf, tr func(string) string, text string) {
 // ── Timeline ──────────────────────────────────────────────────────────────────
 
 func drawTimelineFromText(pdf *fpdf.Fpdf, tr func(string) string, raw string) {
+	type ev struct {
+		t      time.Time
+		hasT   bool
+		detail string
+	}
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
-	if len(lines) > 10 {
-		lines = lines[:10]
+	items := make([]ev, 0, len(lines))
+	for _, ln := range lines {
+		s := strings.TrimSpace(ln)
+		if s == "" {
+			continue
+		}
+		ts := ""
+		detail := s
+		if parts := strings.SplitN(s, "|", 2); len(parts) == 2 {
+			ts = strings.TrimSpace(parts[0])
+			detail = strings.TrimSpace(parts[1])
+		}
+		t, err := time.ParseInLocation("020106 15:04:05", ts, tz.Jakarta)
+		if err == nil {
+			items = append(items, ev{t: t, hasT: true, detail: detail})
+		} else {
+			items = append(items, ev{detail: detail})
+		}
+	}
+	if len(items) > 16 {
+		items = items[:16]
+	}
+	if len(items) == 0 {
+		pdf.SetX(marginL)
+		pdf.SetFont("Helvetica", "I", 8.5)
+		pdf.SetTextColor(textDimR, textDimG, textDimB)
+		pdf.MultiCell(contentW, 4.2, "(Belum diisi)", "", "L", false)
+		return
 	}
 
-	dotX := marginL + 5.0
-	textX := marginL + 15.0
-	textW := contentW - 15.0
+	dateKey := func(t time.Time) string { return t.In(tz.Jakarta).Format("2006-01-02") }
+	dateLabel := func(t time.Time) string { return t.In(tz.Jakarta).Format("Monday, 02 Jan 2006") }
 
-	for i, l := range lines {
-		l = strings.TrimSpace(l)
-		if l == "" {
-			continue
+	xLine := marginL + 3.5
+	xTime := marginL + 7.5
+	xText := marginL + 19.0
+	textW := contentW - (xText - marginL)
+
+	var lastDate string
+	for i, it := range items {
+		if it.hasT {
+			k := dateKey(it.t)
+			if k != lastDate {
+				// Date chip + separator line
+				y := pdf.GetY()
+				pdf.SetFillColor(217, 197, 154)
+				chipW := pdf.GetStringWidth(dateLabel(it.t)) + 12
+				pdf.RoundedRect(marginL, y, chipW, 7, 3, "1234", "F")
+				pdf.SetFont("Helvetica", "B", 7.5)
+				pdf.SetTextColor(120, 77, 15)
+				pdf.SetXY(marginL+6, y+1.6)
+				pdf.CellFormat(chipW-8, 4, dateLabel(it.t), "", 0, "L", false, 0, "")
+				pdf.SetDrawColor(borderR, borderG, borderB)
+				pdf.Line(marginL+chipW+4, y+3.6, marginL+contentW, y+3.6)
+				pdf.SetY(y + 9)
+				lastDate = k
+			}
 		}
 
 		y := pdf.GetY()
-		rowH := 8.0
-
-		// Connecting line (before dot, except on first)
 		if i > 0 {
-			pdf.SetDrawColor(209, 213, 219)
-			pdf.Line(dotX, y-1, dotX, y+2)
+			pdf.SetDrawColor(207, 213, 219)
+			pdf.Line(xLine, y-1.5, xLine, y+2.5)
 		}
-
-		// Dot — filled circle with number
 		pdf.SetFillColor(accentR, accentG, accentB)
-		pdf.Circle(dotX, y+rowH/2, 3.5, "F")
-		pdf.SetFont("Helvetica", "B", 7)
-		pdf.SetTextColor(255, 255, 255)
-		num := fmt.Sprintf("%d", i+1)
-		numW := pdf.GetStringWidth(num)
-		pdf.SetXY(dotX-numW/2-0.5, y+rowH/2-2.5)
-		pdf.CellFormat(numW+1, 5, num, "", 0, "C", false, 0, "")
+		pdf.Circle(xLine, y+2.4, 1.2, "F")
 
-		// Event card
-		pdf.SetFillColor(248, 250, 252)
-		pdf.SetDrawColor(borderR, borderG, borderB)
-		pdf.RoundedRect(textX, y, textW, rowH, 2, "1234", "FD")
-		pdf.SetXY(textX+4, y+1.5)
-		pdf.SetFont("Helvetica", "", 8.5)
+		if it.hasT {
+			pdf.SetFont("Helvetica", "", 7)
+			pdf.SetTextColor(textDimR, textDimG, textDimB)
+			pdf.SetXY(xTime, y)
+			pdf.CellFormat(10, 3.8, it.t.In(tz.Jakarta).Format("15:04"), "", 0, "L", false, 0, "")
+		}
+
+		pdf.SetXY(xText, y)
+		pdf.SetFont("Helvetica", "B", 9)
 		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-		pdf.CellFormat(textW-8, 5.5, tr(l), "", 0, "L", false, 0, "")
-
-		// Connecting line (after dot, except on last non-empty)
-		nextNonEmpty := false
-		for j := i + 1; j < len(lines); j++ {
-			if strings.TrimSpace(lines[j]) != "" {
-				nextNonEmpty = true
-				break
-			}
+		title := it.detail
+		desc := ""
+		if p := strings.SplitN(it.detail, ".", 2); len(p) == 2 {
+			title = strings.TrimSpace(p[0])
+			desc = strings.TrimSpace(p[1])
 		}
-		if nextNonEmpty {
-			pdf.SetDrawColor(209, 213, 219)
-			pdf.Line(dotX, y+rowH, dotX, y+rowH+2)
+		pdf.MultiCell(textW, 4.2, tr(title), "", "L", false)
+		if desc != "" {
+			pdf.SetX(xText)
+			pdf.SetFont("Helvetica", "", 8.2)
+			pdf.SetTextColor(textMidR, textMidG, textMidB)
+			pdf.MultiCell(textW, 3.8, tr(desc), "", "L", false)
 		}
-
-		pdf.SetY(y + rowH + 2)
+		pdf.Ln(1.2)
 	}
 }
 
@@ -534,12 +538,36 @@ func drawTimelineFromText(pdf *fpdf.Fpdf, tr func(string) string, raw string) {
 
 func renderPDFRCASections(pdf *fpdf.Fpdf, tr func(string) string, rca store.CaseRCA) {
 	rca = rca.Normalize()
-	pdfRCATextBlock(pdf, tr, "KRONOLOGI INSIDEN", rca.IncidentTimeline)
+	// ROOT CAUSE (highlighted box)
+	if strings.TrimSpace(rca.RootCause) != "" {
+		sectionHeader(pdf, "ROOT CAUSE")
+		drawRootCauseBox(pdf, tr, rca.RootCause)
+		pdf.Ln(1)
+	} else {
+		pdfRCATextBlock(pdf, tr, "ROOT CAUSE", "")
+	}
+
+	// TIMELINE INSIDEN (visual timeline)
+	sectionHeader(pdf, "TIMELINE INSIDEN")
+	if strings.TrimSpace(rca.IncidentTimeline) == "" {
+		pdf.SetX(marginL)
+		pdf.SetFont("Helvetica", "I", rcaBodyFontPt)
+		pdf.SetTextColor(textDimR, textDimG, textDimB)
+		pdf.MultiCell(contentW, rcaBodyLineMM, tr("(Belum diisi)"), "", "L", false)
+		pdf.Ln(afterRcaBlockLn)
+	} else {
+		drawTimelineFromText(pdf, tr, rca.IncidentTimeline)
+		pdf.Ln(1)
+	}
+
+	// Rantai penyebab (5 whys) tetap ada, tapi formatnya bagian analisis (opsional).
 	draw5WhysSection(pdf, tr, rca.FiveWhys)
-	pdfRCATextBlock(pdf, tr, "AKAR MASALAH (ROOT CAUSE)", rca.RootCause)
-	pdfRCATextBlock(pdf, tr, "FAKTOR KONTRIBUTOR", rca.ContributingFactors)
-	pdfRCATextBlock(pdf, tr, "TINDAKAN KOREKTIF", rca.CorrectiveActions)
-	pdfRCATextBlock(pdf, tr, "TINDAKAN PENCEGAHAN", rca.PreventiveActions)
+
+	pdfRCATextBlock(pdf, tr, "TEMUAN UTAMA", rca.ContributingFactors)
+	pdfRCATextBlock(pdf, tr, "PERBAIKAN YANG DITERAPKAN", rca.CorrectiveActions)
+	pdfRCATextBlock(pdf, tr, "PENCEGAHAN & TINDAK LANJUT", rca.PreventiveActions)
+	pdfActionItemsBlock(pdf, tr, "ACTION ITEMS", rca.ActionItems)
+	pdfRCATextBlock(pdf, tr, "CELAH DETEKSI", rca.DetectionGap)
 }
 
 func pdfRCATextBlock(pdf *fpdf.Fpdf, tr func(string) string, title, body string) {
@@ -554,6 +582,28 @@ func pdfRCATextBlock(pdf *fpdf.Fpdf, tr func(string) string, title, body string)
 		pdf.SetFont("Helvetica", "", rcaBodyFontPt)
 		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
 		pdf.MultiCell(contentW, rcaBodyLineMM, tr(body), "", "L", false)
+	}
+	pdf.Ln(afterRcaBlockLn)
+}
+
+func pdfActionItemsBlock(pdf *fpdf.Fpdf, tr func(string) string, title string, items []string) {
+	sectionHeader(pdf, title)
+	pdf.SetX(marginL)
+	if len(items) == 0 {
+		pdf.SetFont("Helvetica", "I", rcaBodyFontPt)
+		pdf.SetTextColor(textDimR, textDimG, textDimB)
+		pdf.MultiCell(contentW, rcaBodyLineMM, tr("(Belum diisi)"), "", "L", false)
+		pdf.Ln(afterRcaBlockLn)
+		return
+	}
+	pdf.SetFont("Helvetica", "", rcaBodyFontPt)
+	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+	for i, it := range items {
+		it = strings.TrimSpace(it)
+		if it == "" {
+			continue
+		}
+		pdf.MultiCell(contentW, rcaBodyLineMM, tr(fmt.Sprintf("%d. %s", i+1, it)), "", "L", false)
 	}
 	pdf.Ln(afterRcaBlockLn)
 }

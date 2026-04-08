@@ -107,26 +107,21 @@ func TestPDF_ContainsRCAAndOmitsProgressBar(t *testing.T) {
 		t.Fatalf("expected >= 2 pages, got %d", pages)
 	}
 
-	// Checklist must be present...
-	if !bytes.Contains(pdfBytes, []byte("KRONOLOGI & CHECKLIST")) {
-		t.Fatalf("pdf must contain checklist section")
-	}
-	// ...but without progress summary line.
-	if bytes.Contains(pdfBytes, []byte("langkah selesai")) || bytes.Contains(pdfBytes, []byte("dari")) {
-		// Keep this check loose; we mainly want to ensure the explicit summary line is gone.
-		if bytes.Contains(pdfBytes, []byte("dari")) && bytes.Contains(pdfBytes, []byte("langkah selesai")) {
-			t.Fatalf("pdf must omit progress summary line")
-		}
+	// Checklist and chronology must be removed from PDF layout.
+	if bytes.Contains(pdfBytes, []byte("KRONOLOGI & CHECKLIST")) {
+		t.Fatalf("pdf must not contain checklist section")
 	}
 
 	// RCA headings should exist.
 	for _, needle := range []string{
-		"KRONOLOGI INSIDEN",
+		"ROOT CAUSE",
+		"TIMELINE INSIDEN",
 		"ANALISIS 5 WHYS",
-		"AKAR MASALAH",
-		"FAKTOR KONTRIBUTOR",
-		"TINDAKAN KOREKTIF",
-		"TINDAKAN PENCEGAHAN",
+		"TEMUAN UTAMA",
+		"PERBAIKAN YANG DITERAPKAN",
+		"PENCEGAHAN & TINDAK LANJUT",
+		"ACTION ITEMS",
+		"CELAH DETEKSI",
 	} {
 		if !bytes.Contains(pdfBytes, []byte(needle)) {
 			t.Fatalf("missing %q in pdf", needle)
@@ -152,15 +147,67 @@ func TestPDF_EmptyRCA_ShowsPlaceholders(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, needle := range []string{
-		"KRONOLOGI INSIDEN",
+		"ROOT CAUSE",
+		"TIMELINE INSIDEN",
 		"ANALISIS 5 WHYS",
 		"Why 1:",
-		"AKAR MASALAH",
+		"TEMUAN UTAMA",
 		"Belum diisi",
 	} {
 		if !bytes.Contains(pdfBytes, []byte(needle)) {
 			t.Fatalf("expected %q in pdf", needle)
 		}
+	}
+}
+
+func TestPDF_TemplateSections_ExcludeSessionEvidence(t *testing.T) {
+	td := t.TempDir()
+	now := time.Date(2026, 4, 8, 13, 0, 0, 0, time.UTC)
+	rca := store.CaseRCA{
+		RootCause:           "Status login membaca sumber sesi yang tidak konsisten.",
+		IncidentTimeline:    "10:21 laporan pertama diterima\n10:30 investigasi dimulai",
+		ContributingFactors: "Masalah terlihat saat akses HTTPS di iOS.",
+		CorrectiveActions:   "Validasi diarahkan ke sesi login utama.",
+		PreventiveActions:   "Tambah regression test iOS Safari.",
+		ActionItems:         []string{"Rilis perbaikan ke production", "Review alur login lain"},
+		DetectionGap:        "Perilaku lokal berbeda dengan produksi sehingga isu terlambat terdeteksi.",
+	}.Normalize()
+	rcaJSON, err := store.MarshalCaseRCAJSON(rca)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &store.Case{
+		CaseID:    "OPS-TEMPLATE-1",
+		Title:     "Template section check",
+		Status:    "open",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Summary:   "Ringkasan contoh.",
+		RCAJSON:   rcaJSON,
+	}
+	opts := DefaultPDFOptions()
+	opts.IncludeChecklist = false
+	pdfBytes, err := PDFWithOptions(c, nil, nil, nil, td, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, needle := range []string{
+		"RINGKASAN",
+		"ROOT CAUSE",
+		"TIMELINE INSIDEN",
+		"TEMUAN UTAMA",
+		"PERBAIKAN YANG DITERAPKAN",
+		"PENCEGAHAN & TINDAK LANJUT",
+		"ACTION ITEMS",
+		"CELAH DETEKSI",
+		"Rilis perbaikan ke production",
+	} {
+		if !bytes.Contains(pdfBytes, []byte(needle)) {
+			t.Fatalf("expected %q in pdf", needle)
+		}
+	}
+	if bytes.Contains(pdfBytes, []byte("BUKTI PERILAKU SESI")) {
+		t.Fatalf("pdf must not contain session evidence section")
 	}
 }
 

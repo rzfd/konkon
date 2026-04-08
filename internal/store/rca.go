@@ -10,19 +10,38 @@ type CaseRCA struct {
 	IncidentTimeline    string   `json:"incident_timeline"`
 	FiveWhys            []string `json:"five_whys"`
 	RootCause           string   `json:"root_cause"`
-	ContributingFactors string   `json:"contributing_factors"`
-	CorrectiveActions   string   `json:"corrective_actions"`
-	PreventiveActions   string   `json:"preventive_actions"`
+	ContributingFactors string   `json:"contributing_factors"` // also used for "Temuan Utama"
+	CorrectiveActions   string   `json:"corrective_actions"`   // "Perbaikan yang diterapkan"
+	PreventiveActions   string   `json:"preventive_actions"`   // "Pencegahan"
+
+	// Extra narrative blocks used by the RCA_SAFARI_AUTH template.
+	ActionItems  []string `json:"action_items"`  // short actionable items
+	DetectionGap string   `json:"detection_gap"` // "Celah deteksi"
 }
 
-// Normalize pads/truncates five_whys to exactly 5 entries.
+// Normalize trims empty items and caps list sizes to reasonable bounds.
 func (r CaseRCA) Normalize() CaseRCA {
-	for len(r.FiveWhys) < 5 {
-		r.FiveWhys = append(r.FiveWhys, "")
+	if len(r.FiveWhys) > 12 {
+		r.FiveWhys = r.FiveWhys[:12]
 	}
-	if len(r.FiveWhys) > 5 {
-		r.FiveWhys = r.FiveWhys[:5]
+	trimWhys := r.FiveWhys[:0]
+	for _, w := range r.FiveWhys {
+		if strings.TrimSpace(w) != "" {
+			trimWhys = append(trimWhys, w)
+		}
 	}
+	r.FiveWhys = trimWhys
+	// Cap action items to a reasonable size and trim empties.
+	if len(r.ActionItems) > 12 {
+		r.ActionItems = r.ActionItems[:12]
+	}
+	trimmed := r.ActionItems[:0]
+	for _, it := range r.ActionItems {
+		if strings.TrimSpace(it) != "" {
+			trimmed = append(trimmed, it)
+		}
+	}
+	r.ActionItems = trimmed
 	return r
 }
 
@@ -47,6 +66,12 @@ func (r CaseRCA) HasContent() bool {
 		return true
 	}
 	if strings.TrimSpace(r.PreventiveActions) != "" {
+		return true
+	}
+	if len(r.ActionItems) > 0 {
+		return true
+	}
+	if strings.TrimSpace(r.DetectionGap) != "" {
 		return true
 	}
 	return false

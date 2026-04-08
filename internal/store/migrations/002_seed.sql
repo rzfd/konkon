@@ -6,7 +6,7 @@ INSERT OR IGNORE INTO sop (id, slug, title, version, owner, steps_json, created_
   {"title": "Kumpulkan bukti: dashboard / log / trace id", "requires_evidence": true},
   {"title": "Mitigasi atau rollback sesuai runbook", "requires_evidence": true},
   {"title": "Komunikasi status ke stakeholder internal", "requires_evidence": false},
-  {"title": "Verifikasi pemulihan dan tutup monitoring sementara", "requires_evidence": true}
+  {"title": "Verifikasi pemulihan", "requires_evidence": true}
 ]', datetime('now')),
 
 (2, 'payment-latency', 'Investigasi latency / timeout pembayaran', 1, 'techops', '[
