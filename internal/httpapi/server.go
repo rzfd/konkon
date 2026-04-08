@@ -654,6 +654,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("list attachments for pdf", "err", err)
 			attachments = nil
 		}
+		stepAtts, _ := s.store.ListStepAttachmentsForCase(ctx, id)
 		opts := render.DefaultPDFOptions()
 		// format knobs:
 		// - include_checklist=0|1
@@ -670,7 +671,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			opts.Compression = true
 		}
 
-		pdfBytes, err := render.PDFWithOptions(c, steps, attachments, s.uploadRoot, opts)
+		pdfBytes, err := render.PDFWithOptions(c, steps, attachments, stepAtts, s.uploadRoot, opts)
 		if err != nil {
 			s.log.Error("render pdf", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)

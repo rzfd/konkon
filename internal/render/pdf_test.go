@@ -97,7 +97,7 @@ func TestPDF_ContainsRCAAndOmitsProgressBar(t *testing.T) {
 
 	opts := DefaultPDFOptions()
 	opts.IncludeChecklistProgress = false
-	pdfBytes, err := PDFWithOptions(c, steps, attachments, td, opts)
+	pdfBytes, err := PDFWithOptions(c, steps, attachments, nil, td, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
