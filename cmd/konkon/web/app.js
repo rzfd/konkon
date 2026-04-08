@@ -1085,10 +1085,12 @@ function attachStepChecker() {
       const evVal  = (ev?.value  || "").trim();
       const whoVal = (who?.value || "").trim();
       if (warnDiv) {
-        warnDiv.textContent = (reqEv && !evVal) ? "⚠ URL bukti wajib diisi untuk langkah ini" : "";
+        // URL bukti tidak wajib; bukti bisa berupa upload gambar atau catatan internal.
+        warnDiv.textContent = "";
       }
       if (saveBtn) {
-        saveBtn.classList.toggle("step-ready", (!reqEv || !!evVal) && !!whoVal);
+        // Syarat UI untuk menandai selesai hanya "diselesaikan oleh"; URL bukti opsional.
+        saveBtn.classList.toggle("step-ready", !!whoVal);
       }
     }
 
