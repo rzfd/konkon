@@ -89,6 +89,56 @@ function normalizeRca(rca) {
   };
 }
 
+function rcaPayloadFromDom() {
+  return {
+    incident_timeline: document.getElementById("rca-timeline")?.value ?? "",
+    five_whys: [1, 2, 3, 4, 5].map((n) => document.getElementById(`rca-why-${n}`)?.value ?? ""),
+    root_cause: document.getElementById("rca-root")?.value ?? "",
+    contributing_factors: document.getElementById("rca-contrib")?.value ?? "",
+    corrective_actions: document.getElementById("rca-corrective")?.value ?? "",
+    preventive_actions: document.getElementById("rca-preventive")?.value ?? "",
+  };
+}
+
+async function flushChecklistFieldsToServer(caseId) {
+  const items = [...document.querySelectorAll("#steps li[data-id]")];
+  await Promise.all(
+    items.map((li) => {
+      const sid = li.getAttribute("data-id");
+      const ev = li.querySelector(".ev");
+      const notes = li.querySelector(".notes");
+      const who = li.querySelector(".who");
+      return api(`/api/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(sid)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          evidence_url: ev?.value ?? "",
+          notes: notes?.value ?? "",
+          done_by: who?.value ?? "",
+        }),
+      });
+    })
+  );
+}
+
+async function exportCaseSummary(id, format) {
+  try {
+    await api(`/api/cases/${encodeURIComponent(id)}/rca`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rcaPayloadFromDom()),
+    });
+    await flushChecklistFieldsToServer(id);
+  } catch (e) {
+    const msg = typeof e.body === "string" ? e.body : e.body?.error || e.message;
+    const ok = await confirmDialog(
+      `Gagal menyimpan isian form ke server sebelum ekspor: ${msg}\n\nLanjutkan ekspor memakai data terakhir yang tersimpan di server?`
+    );
+    if (!ok) return;
+  }
+  window.open(`/api/cases/${encodeURIComponent(id)}/summary?format=${encodeURIComponent(format)}`, "_blank", "noopener");
+}
+
 function caseMetaHtml(c) {
   const rows = [
     ["Layanan",    c.service],
@@ -548,9 +598,9 @@ async function renderCase(id) {
             ${c.summary ? `<p class="text-sm text-[#a9b4c4] mt-4 mb-0 leading-relaxed border-t border-[#253041] pt-4"><span class="text-[11px] font-bold uppercase tracking-wider text-[#93c5fd] block mb-1.5">Ringkasan eksekutif</span>${esc(c.summary)}</p>` : ""}
           </div>
           <div class="absolute top-4 right-4 flex flex-col sm:flex-row gap-2">
-            <a class="${BtnSm} no-underline text-center justify-center" href="/api/cases/${encodeURIComponent(id)}/summary?format=md" target="_blank" rel="noopener">MD</a>
-            <a class="${BtnSm} no-underline text-center justify-center" href="/api/cases/${encodeURIComponent(id)}/summary?format=html" target="_blank" rel="noopener">HTML</a>
-            <a class="${BtnSm} no-underline text-center justify-center" href="/api/cases/${encodeURIComponent(id)}/summary?format=pdf" target="_blank" rel="noopener">PDF</a>
+            <button type="button" class="case-export-btn ${BtnSm}" data-format="md">MD</button>
+            <button type="button" class="case-export-btn ${BtnSm}" data-format="html">HTML</button>
+            <button type="button" class="case-export-btn ${BtnSm}" data-format="pdf">PDF</button>
           </div>
         </div>
       </div>
@@ -564,7 +614,7 @@ async function renderCase(id) {
       <!-- RCA (masuk PDF / HTML / MD export) -->
       <div class="${Card}">
         <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-1 m-0">Analisis RCA</h2>
-        <p class="text-xs text-[#a9b4c4] mb-4">Semua field di bawah opsional. Yang terisi akan muncul di ekspor MD/HTML/PDF.</p>
+        <p class="text-xs text-[#a9b4c4] mb-4">Semua field di bawah opsional. Tombol MD/HTML/PDF menyimpan dulu isian RCA dan field checklist (URL bukti, catatan, diselesaikan oleh) ke server, lalu membuka ekspor. Field RCA kosong tetap tampil di PDF sebagai placeholder.</p>
         <div class="space-y-4">
           <div>
             <label class="${LB}">Kronologi insiden <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
@@ -632,17 +682,14 @@ async function renderCase(id) {
         ${auditHtml}
       </div>`;
 
+    app.querySelectorAll(".case-export-btn").forEach((btn) => {
+      btn.addEventListener("click", () => exportCaseSummary(id, btn.getAttribute("data-format") || "pdf"));
+    });
+
     document.getElementById("saveRca").addEventListener("click", async () => {
       const errEl = document.getElementById("rcaErr");
       errEl.textContent = "";
-      const body = {
-        incident_timeline: document.getElementById("rca-timeline").value,
-        five_whys: [1, 2, 3, 4, 5].map((n) => document.getElementById(`rca-why-${n}`).value),
-        root_cause: document.getElementById("rca-root").value,
-        contributing_factors: document.getElementById("rca-contrib").value,
-        corrective_actions: document.getElementById("rca-corrective").value,
-        preventive_actions: document.getElementById("rca-preventive").value,
-      };
+      const body = rcaPayloadFromDom();
       try {
         await api(`/api/cases/${encodeURIComponent(id)}/rca`, {
           method: "PATCH",

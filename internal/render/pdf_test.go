@@ -134,6 +134,36 @@ func TestPDF_ContainsRCAAndOmitsProgressBar(t *testing.T) {
 	}
 }
 
+func TestPDF_EmptyRCA_ShowsPlaceholders(t *testing.T) {
+	td := t.TempDir()
+	now := time.Date(2026, 4, 8, 12, 0, 0, 0, time.UTC)
+	c := &store.Case{
+		CaseID:    "OPS-EMPTY-1",
+		Title:     "RCA placeholder smoke",
+		Status:    "open",
+		CreatedAt: now,
+		UpdatedAt: now,
+		RCAJSON:   "",
+	}
+	opts := DefaultPDFOptions()
+	opts.IncludeChecklist = false
+	pdfBytes, err := PDFWithOptions(c, nil, nil, nil, td, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, needle := range []string{
+		"KRONOLOGI INSIDEN",
+		"ANALISIS 5 WHYS",
+		"Why 1:",
+		"AKAR MASALAH",
+		"Belum diisi",
+	} {
+		if !bytes.Contains(pdfBytes, []byte(needle)) {
+			t.Fatalf("expected %q in pdf", needle)
+		}
+	}
+}
+
 func ptrInt(v int) *int       { return &v }
 func ptrInt64(v int64) *int64 { return &v }
 

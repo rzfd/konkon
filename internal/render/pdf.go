@@ -14,8 +14,6 @@ import (
 
 // ── colour palette ────────────────────────────────────────────────────────────
 const (
-	pageBgR, pageBgG, pageBgB = 255, 255, 255
-
 	// Hero banner — dark navy
 	heroR, heroG, heroB = 15, 23, 42 // slate-900
 
@@ -39,11 +37,48 @@ const (
 	orangeR, orangeG, orangeB = 234, 88, 12
 	yellowR, yellowG, yellowB = 202, 138, 4
 
-	// Page layout
+	// Page layout — margins sedikit diperkecil agar kolom teks lebih lebar (laporan padat).
 	pageW    = 210.0
-	marginL  = 18.0
-	marginR  = 18.0
+	marginL  = 14.0
+	marginR  = 14.0
 	contentW = pageW - marginL - marginR
+
+	// A4 height (mm) and bottom margin — must match SetAutoPageBreak below.
+	pdfPageHeightMM          = 297.0
+	pdfAutoPageBreakMarginMM = 16.0
+
+	// ── Dense / “padat” typography (mirip template RCA naratif penuh) ───────────
+	bannerBandH       = 32.0 // tinggi strip abu header halaman 1
+	bannerAccentY     = 28.0 // posisi strip biru bawah banner
+	bannerEyebrowY    = 5.5
+	titleCaseIDFontPt = 10.0
+	titleCaseIDLineH  = 5.0
+	titleMainFontPt   = 14.0
+	titleMainLineH    = 5.0
+	afterTitleLn      = 3.0
+	badgeAnchorY      = 10.0 // jarak vertikal blok badge dari baseline
+	afterBadgeLn      = 2.0
+	sectionHdrH       = 6.5
+	sectionHdrFontPt  = 8.0
+	sectionHdrTextY   = 1.2
+	afterSectionHdrLn = 1.8
+	metaRowPitchMM    = 7.2
+	metaCardPadTop    = 4.0
+	metaCardPadBottom = 8.0
+	rcaBodyFontPt     = 8.5
+	rcaBodyLineMM     = 4.2
+	afterRcaBlockLn   = 2.0
+	whyCardH          = 11.0
+	whyBodyLineMM     = 3.8
+	stepTitleLineMM   = 4.2
+	stepMetaLineMM    = 3.6
+	afterStepLn       = 1.0
+	progressBarH      = 3.5
+	afterProgressLn   = 1.8
+	sopStripH         = 8.0
+	// Tall phone screenshots scaled to full content width used to exceed page height, clip, and confuse Y — cap height.
+	pdfMaxLampiranImageHMM = 165.0
+	pdfMaxStepEvidenceHMM  = 72.0
 )
 
 // ── option types ──────────────────────────────────────────────────────────────
@@ -71,15 +106,14 @@ func PDF(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachme
 func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.CaseAttachment, stepAtts map[int64][]store.CaseAttachment, uploadRoot string, opts PDFOptions) ([]byte, error) {
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(marginL, 0, marginR)
-	pdf.SetAutoPageBreak(true, 20)
+	pdf.SetAutoPageBreak(true, pdfAutoPageBreakMarginMM)
 	pdf.SetCompression(opts.Compression)
 
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 
-	pdf.SetHeaderFunc(func() {
-		pdf.SetFillColor(pageBgR, pageBgG, pageBgB)
-		pdf.Rect(0, 0, pageW, 297, "F")
-	})
+	// No full-page header fill: a white rectangle over the whole MediaBox breaks or
+	// hides body text in some PDF viewers (Chrome/Edge) after page breaks.
+	pdf.SetHeaderFunc(nil)
 
 	pdf.SetFooterFunc(func() {
 		// Bottom accent strip
@@ -99,23 +133,23 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 
 	pdf.AddPage()
 
-	// HEADER BANNER (legacy style)
+	// HEADER BANNER (halaman 1 — ringkas agar ruang untuk narasi RCA)
 	pdf.SetFillColor(headerBgR, headerBgG, headerBgB)
-	pdf.Rect(0, 0, pageW, 42, "F")
+	pdf.Rect(0, 0, pageW, bannerBandH, "F")
 	pdf.SetFillColor(accentR, accentG, accentB)
-	pdf.Rect(0, 38, pageW, 4, "F")
-	pdf.SetXY(marginL, 8)
-	pdf.SetFont("Helvetica", "B", 7.5)
+	pdf.Rect(0, bannerAccentY, pageW, 4, "F")
+	pdf.SetXY(marginL, bannerEyebrowY)
+	pdf.SetFont("Helvetica", "B", 7)
 	pdf.SetTextColor(accentR, accentG, accentB)
-	pdf.CellFormat(contentW, 5, "KONKON TECHOPS  |  ROOT CAUSE ANALYSIS (RCA)", "", 1, "L", false, 0, "")
+	pdf.CellFormat(contentW, 4, "KONKON TECHOPS  |  ROOT CAUSE ANALYSIS (RCA)", "", 1, "L", false, 0, "")
 	pdf.SetX(marginL)
-	pdf.SetFont("Helvetica", "B", 11)
-	pdf.CellFormat(contentW, 6, tr(c.CaseID), "", 1, "L", false, 0, "")
+	pdf.SetFont("Helvetica", "B", titleCaseIDFontPt)
+	pdf.CellFormat(contentW, titleCaseIDLineH, tr(c.CaseID), "", 1, "L", false, 0, "")
 	pdf.SetX(marginL)
-	pdf.SetFont("Helvetica", "B", 17)
+	pdf.SetFont("Helvetica", "B", titleMainFontPt)
 	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-	pdf.MultiCell(contentW, 7, tr(c.Title), "", "L", false)
-	pdf.Ln(6)
+	pdf.MultiCell(contentW, titleMainLineH, tr(c.Title), "", "L", false)
+	pdf.Ln(afterTitleLn)
 
 	// badges
 	y := pdf.GetY()
@@ -127,8 +161,8 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 	if c.Service != "" {
 		drawBadge(pdf, &x, y, "LAYANAN", tr(c.Service), [3]int{accentR, accentG, accentB})
 	}
-	pdf.SetY(y + 12)
-	pdf.Ln(4)
+	pdf.SetY(y + badgeAnchorY)
+	pdf.Ln(afterBadgeLn)
 
 	sectionHeader(pdf, "INFORMASI INSIDEN")
 	type kv struct{ k, v string }
@@ -143,12 +177,13 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 	colW := contentW/2 - 3
 	rows := max(len(left), len(right))
 	cardY := pdf.GetY()
+	cardInnerH := float64(rows)*metaRowPitchMM + metaCardPadTop + metaCardPadBottom
 	pdf.SetFillColor(panelR, panelG, panelB)
 	pdf.SetDrawColor(226, 232, 240)
 	pdf.SetLineWidth(0.2)
-	pdf.RoundedRect(marginL, cardY, contentW, float64(rows)*9+10, 2, "1234", "FD")
+	pdf.RoundedRect(marginL, cardY, contentW, cardInnerH, 2, "1234", "FD")
 	for i := 0; i < rows; i++ {
-		rowY := cardY + 5 + float64(i)*9
+		rowY := cardY + metaCardPadTop + float64(i)*metaRowPitchMM
 		if i < len(left) {
 			metaRow(pdf, marginL+4, rowY, colW, left[i].k, left[i].v)
 		}
@@ -156,7 +191,7 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 			metaRow(pdf, marginL+colW+6, rowY, colW, right[i].k, right[i].v)
 		}
 	}
-	pdf.SetY(cardY + float64(rows)*9 + 14)
+	pdf.SetY(cardY + cardInnerH + 2)
 
 	if len(attachments) > 0 {
 		sectionHeader(pdf, "LAMPIRAN")
@@ -171,35 +206,24 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 			pdf.SetX(marginL)
 			pdf.CellFormat(contentW, 5, tr(att.OriginalName), "", 1, "L", false, 0, "")
 			pdf.Ln(1)
-			imgY := pdf.GetY()
-			tp := ext
-			if tp == "jpg" {
-				tp = "jpeg"
+			if !drawLampiranImage(pdf, tr, fullPath, ext) {
+				pdf.SetFont("Helvetica", "I", 8)
+				pdf.SetTextColor(textDimR, textDimG, textDimB)
+				pdf.SetX(marginL)
+				pdf.MultiCell(contentW, 4, tr("(Gagal memuat gambar)"), "", "L", false)
+				pdf.Ln(2)
 			}
-			pdf.Image(fullPath, marginL, imgY, contentW, 0, false, strings.ToUpper(tp), 0, "")
-			info := pdf.GetImageInfo(fullPath)
-			if info != nil {
-				scale := contentW / info.Width()
-				pdf.SetY(imgY + info.Height()*scale)
-			}
-			pdf.Ln(4)
+			pdf.Ln(2)
 		}
 	}
 
 	if c.Summary != "" {
-		sy := pdf.GetY()
-		pdf.SetFillColor(panelR, panelG, panelB)
-		pdf.SetDrawColor(226, 232, 240)
-		pdf.RoundedRect(marginL, sy, contentW, 0, 2, "1234", "FD")
-		pdf.SetFont("Helvetica", "B", 8)
-		pdf.SetTextColor(accentR, accentG, accentB)
-		pdf.SetXY(marginL+4, sy+4)
-		pdf.CellFormat(contentW-8, 5, "RINGKASAN EKSEKUTIF", "", 1, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "", 9)
+		sectionHeader(pdf, "RINGKASAN EKSEKUTIF")
+		pdf.SetX(marginL)
+		pdf.SetFont("Helvetica", "", rcaBodyFontPt)
 		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-		pdf.SetX(marginL + 4)
-		pdf.MultiCell(contentW-8, 5.5, tr(c.Summary), "", "L", false)
-		pdf.Ln(4)
+		pdf.MultiCell(contentW, rcaBodyLineMM, tr(c.Summary), "", "L", false)
+		pdf.Ln(afterRcaBlockLn)
 	}
 
 	renderPDFRCASections(pdf, tr, store.ParseCaseRCAJSON(c.RCAJSON))
@@ -208,15 +232,15 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 		sy := pdf.GetY()
 		pdf.SetFillColor(239, 246, 255)
 		pdf.SetDrawColor(accentR, accentG, accentB)
-		pdf.RoundedRect(marginL, sy, contentW, 10, 2, "1234", "FD")
-		pdf.SetXY(marginL+4, sy+2.5)
-		pdf.SetFont("Helvetica", "B", 8)
+		pdf.RoundedRect(marginL, sy, contentW, sopStripH, 2, "1234", "FD")
+		pdf.SetXY(marginL+4, sy+1.8)
+		pdf.SetFont("Helvetica", "B", 7.5)
 		pdf.SetTextColor(accentR, accentG, accentB)
-		pdf.CellFormat(22, 5, "SOP:", "", 0, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "", 8.5)
+		pdf.CellFormat(18, 4.5, "SOP:", "", 0, "L", false, 0, "")
+		pdf.SetFont("Helvetica", "", 8)
 		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-		pdf.CellFormat(contentW-26, 5, tr(fmt.Sprintf("%s  (v%d)  -  %s", c.SOPSlug, derefVer(c.SOPVersion), c.SOPTitle)), "", 1, "L", false, 0, "")
-		pdf.Ln(5)
+		pdf.CellFormat(contentW-22, 4.5, tr(fmt.Sprintf("%s  (v%d)  -  %s", c.SOPSlug, derefVer(c.SOPVersion), c.SOPTitle)), "", 1, "L", false, 0, "")
+		pdf.Ln(3)
 	}
 
 	if opts.IncludeChecklist && len(steps) > 0 {
@@ -230,15 +254,15 @@ func PDFWithOptions(c *store.Case, steps []store.CaseStep, attachments []store.C
 			}
 			barY := pdf.GetY()
 			pdf.SetFillColor(226, 232, 240)
-			pdf.Rect(marginL, barY, contentW, 5, "F")
+			pdf.Rect(marginL, barY, contentW, progressBarH, "F")
 			pct := float64(done) / float64(len(steps))
 			pdf.SetFillColor(greenR, greenG, greenB)
-			pdf.Rect(marginL, barY, contentW*pct, 5, "F")
-			pdf.SetXY(marginL, barY+6)
-			pdf.SetFont("Helvetica", "I", 7.5)
+			pdf.Rect(marginL, barY, contentW*pct, progressBarH, "F")
+			pdf.SetXY(marginL, barY+progressBarH+1)
+			pdf.SetFont("Helvetica", "I", 7)
 			pdf.SetTextColor(textMidR, textMidG, textMidB)
-			pdf.CellFormat(contentW, 5, fmt.Sprintf("%d dari %d langkah selesai", done, len(steps)), "", 1, "R", false, 0, "")
-			pdf.Ln(3)
+			pdf.CellFormat(contentW, 4, fmt.Sprintf("%d dari %d langkah selesai", done, len(steps)), "", 1, "R", false, 0, "")
+			pdf.Ln(afterProgressLn)
 		}
 		drawChecklist(pdf, tr, steps, stepAtts, uploadRoot)
 	}
@@ -357,7 +381,7 @@ func drawMetaCards(pdf *fpdf.Fpdf, tr func(string) string, c *store.Case) {
 
 func sectionHeader(pdf *fpdf.Fpdf, title string) {
 	y := pdf.GetY()
-	h := 9.0
+	h := sectionHdrH
 
 	// Full background
 	pdf.SetFillColor(panel2R, panel2G, panel2B)
@@ -365,43 +389,43 @@ func sectionHeader(pdf *fpdf.Fpdf, title string) {
 
 	// Bold blue left bar
 	pdf.SetFillColor(accentR, accentG, accentB)
-	pdf.Rect(marginL, y, 4, h, "F")
+	pdf.Rect(marginL, y, 3.2, h, "F")
 
 	// Title text
-	pdf.SetFont("Helvetica", "B", 9)
+	pdf.SetFont("Helvetica", "B", sectionHdrFontPt)
 	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-	pdf.SetXY(marginL+8, y+2)
-	pdf.CellFormat(contentW-8, 5.5, title, "", 1, "L", false, 0, "")
+	pdf.SetXY(marginL+6.5, y+sectionHdrTextY)
+	pdf.CellFormat(contentW-7, 4.2, title, "", 1, "L", false, 0, "")
 
-	pdf.Ln(3)
+	pdf.Ln(afterSectionHdrLn)
 }
 
 func metaRow(pdf *fpdf.Fpdf, x, y, w float64, label, value string) {
 	pdf.SetXY(x, y)
-	pdf.SetFont("Helvetica", "B", 7.5)
+	pdf.SetFont("Helvetica", "B", 7)
 	pdf.SetTextColor(textMidR, textMidG, textMidB)
-	pdf.CellFormat(28, 4.5, strings.ToUpper(label), "", 0, "L", false, 0, "")
-	pdf.SetFont("Helvetica", "", 8.5)
+	pdf.CellFormat(26, 4, strings.ToUpper(label), "", 0, "L", false, 0, "")
+	pdf.SetFont("Helvetica", "", 8)
 	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-	pdf.MultiCell(w-28, 4.5, value, "", "L", false)
+	pdf.MultiCell(w-26, 4, value, "", "L", false)
 }
 
 func drawBadge(pdf *fpdf.Fpdf, x *float64, y float64, label, value string, rgb [3]int) {
-	pdf.SetFont("Helvetica", "B", 7)
-	lw := pdf.GetStringWidth(label) + 4
-	pdf.SetFont("Helvetica", "B", 9)
-	vw := pdf.GetStringWidth(value) + 6
+	pdf.SetFont("Helvetica", "B", 6.5)
+	lw := pdf.GetStringWidth(label) + 3
+	pdf.SetFont("Helvetica", "B", 8.5)
+	vw := pdf.GetStringWidth(value) + 5
 	bw := lw + vw
 	pdf.SetFillColor(226, 232, 240)
 	pdf.SetTextColor(textMidR, textMidG, textMidB)
 	pdf.SetXY(*x, y)
-	pdf.SetFont("Helvetica", "B", 7)
-	pdf.CellFormat(lw, 8, label, "", 0, "C", true, 0, "")
+	pdf.SetFont("Helvetica", "B", 6.5)
+	pdf.CellFormat(lw, 6.5, label, "", 0, "C", true, 0, "")
 	pdf.SetFillColor(rgb[0], rgb[1], rgb[2])
 	pdf.SetTextColor(255, 255, 255)
-	pdf.SetFont("Helvetica", "B", 9)
-	pdf.CellFormat(vw, 8, value, "", 0, "C", true, 0, "")
-	*x += bw + 4
+	pdf.SetFont("Helvetica", "B", 8.5)
+	pdf.CellFormat(vw, 6.5, value, "", 0, "C", true, 0, "")
+	*x += bw + 3
 }
 
 // ── Root cause highlighted box ────────────────────────────────────────────────
@@ -509,9 +533,6 @@ func drawTimelineFromText(pdf *fpdf.Fpdf, tr func(string) string, raw string) {
 // ── RCA sections ──────────────────────────────────────────────────────────────
 
 func renderPDFRCASections(pdf *fpdf.Fpdf, tr func(string) string, rca store.CaseRCA) {
-	if !rca.HasContent() {
-		return
-	}
 	rca = rca.Normalize()
 	pdfRCATextBlock(pdf, tr, "KRONOLOGI INSIDEN", rca.IncidentTimeline)
 	draw5WhysSection(pdf, tr, rca.FiveWhys)
@@ -523,15 +544,18 @@ func renderPDFRCASections(pdf *fpdf.Fpdf, tr func(string) string, rca store.Case
 
 func pdfRCATextBlock(pdf *fpdf.Fpdf, tr func(string) string, title, body string) {
 	body = strings.TrimSpace(body)
-	if body == "" {
-		return
-	}
 	sectionHeader(pdf, title)
 	pdf.SetX(marginL)
-	pdf.SetFont("Helvetica", "", 9.2)
-	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-	pdf.MultiCell(contentW, 5.5, tr(body), "", "L", false)
-	pdf.Ln(3)
+	if body == "" {
+		pdf.SetFont("Helvetica", "I", rcaBodyFontPt)
+		pdf.SetTextColor(textDimR, textDimG, textDimB)
+		pdf.MultiCell(contentW, rcaBodyLineMM, tr("(Belum diisi)"), "", "L", false)
+	} else {
+		pdf.SetFont("Helvetica", "", rcaBodyFontPt)
+		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+		pdf.MultiCell(contentW, rcaBodyLineMM, tr(body), "", "L", false)
+	}
+	pdf.Ln(afterRcaBlockLn)
 }
 
 // draw5WhysSection renders a visual cascade of five-why cards.
@@ -552,6 +576,14 @@ func draw5WhysSection(pdf *fpdf.Fpdf, tr func(string) string, whys []string) {
 		}
 	}
 	if len(nonEmpty) == 0 {
+		sectionHeader(pdf, "ANALISIS 5 WHYS")
+		for i := 0; i < 5; i++ {
+			pdf.SetX(marginL)
+			pdf.SetFont("Helvetica", "I", 8)
+			pdf.SetTextColor(textDimR, textDimG, textDimB)
+			pdf.MultiCell(contentW, whyBodyLineMM, tr(fmt.Sprintf("Why %d: (belum diisi)", i+1)), "", "L", false)
+		}
+		pdf.Ln(1)
 		return
 	}
 
@@ -566,23 +598,23 @@ func draw5WhysSection(pdf *fpdf.Fpdf, tr func(string) string, whys []string) {
 		c := palette[wi%len(palette)]
 
 		y := pdf.GetY()
-		cardH := 13.0
+		cardH := whyCardH
 
 		// Connecting line from previous card
 		if idx > 0 {
 			pdf.SetDrawColor(c.border[0], c.border[1], c.border[2])
-			pdf.Line(dotX, y-2, dotX, y+3.5)
+			pdf.Line(dotX, y-1.5, dotX, y+2.5)
 		}
 
 		// Number circle
 		pdf.SetFillColor(c.num[0], c.num[1], c.num[2])
-		pdf.Circle(dotX, y+cardH/2, 5.0, "F")
-		pdf.SetFont("Helvetica", "B", 8)
+		pdf.Circle(dotX, y+cardH/2, 4.2, "F")
+		pdf.SetFont("Helvetica", "B", 7)
 		pdf.SetTextColor(255, 255, 255)
 		numStr := fmt.Sprintf("%d", wi+1)
 		numW := pdf.GetStringWidth(numStr)
-		pdf.SetXY(dotX-numW/2-0.5, y+cardH/2-2.5)
-		pdf.CellFormat(numW+1, 5, numStr, "", 0, "C", false, 0, "")
+		pdf.SetXY(dotX-numW/2-0.5, y+cardH/2-2.2)
+		pdf.CellFormat(numW+1, 4.2, numStr, "", 0, "C", false, 0, "")
 
 		// "Why N" label inside circle region — small chip above card
 		whyLabel := fmt.Sprintf("WHY %d", wi+1)
@@ -594,24 +626,24 @@ func draw5WhysSection(pdf *fpdf.Fpdf, tr func(string) string, whys []string) {
 		pdf.RoundedRect(cardX, y, cardW, cardH, 2.5, "1234", "FD")
 
 		// "WHY N" chip inside card header
-		chipW := 17.0
+		chipW := 15.0
 		pdf.SetFillColor(c.num[0], c.num[1], c.num[2])
-		pdf.RoundedRect(cardX+4, y+2.5, chipW, 5.5, 1.5, "1234", "F")
-		pdf.SetFont("Helvetica", "B", 6.5)
+		pdf.RoundedRect(cardX+3, y+2, chipW, 4.8, 1.2, "1234", "F")
+		pdf.SetFont("Helvetica", "B", 6)
 		pdf.SetTextColor(255, 255, 255)
-		pdf.SetXY(cardX+4, y+3.3)
-		pdf.CellFormat(chipW, 4, fmt.Sprintf("WHY %d", wi+1), "", 0, "C", false, 0, "")
+		pdf.SetXY(cardX+3, y+2.6)
+		pdf.CellFormat(chipW, 3.5, fmt.Sprintf("WHY %d", wi+1), "", 0, "C", false, 0, "")
 
 		// Event text
-		pdf.SetFont("Helvetica", "", 8.5)
+		pdf.SetFont("Helvetica", "", 8)
 		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-		pdf.SetXY(cardX+24, y+3.5)
-		pdf.MultiCell(cardW-28, 5, tr(w), "", "L", false)
+		pdf.SetXY(cardX+20, y+2.4)
+		pdf.MultiCell(cardW-24, whyBodyLineMM, tr(w), "", "L", false)
 
-		pdf.SetY(y + cardH + 2)
+		pdf.SetY(y + cardH + 1.2)
 	}
 
-	pdf.Ln(1)
+	pdf.Ln(0.5)
 }
 
 // ── Checklist ─────────────────────────────────────────────────────────────────
@@ -638,14 +670,14 @@ func drawChecklist(pdf *fpdf.Fpdf, tr func(string) string, steps []store.CaseSte
 		}
 
 		// Step title
-		pdf.SetFont("Helvetica", "B", 8.5)
+		pdf.SetFont("Helvetica", "B", 8)
 		if done {
 			pdf.SetTextColor(textMidR, textMidG, textMidB)
 		} else {
 			pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
 		}
 		pdf.SetXY(marginL+boxSize+3, y)
-		pdf.MultiCell(contentW-boxSize-3, 5.2, tr(st.Title), "", "L", false)
+		pdf.MultiCell(contentW-boxSize-3, stepTitleLineMM, tr(st.Title), "", "L", false)
 
 		// Meta line
 		meta := []string{}
@@ -662,10 +694,10 @@ func drawChecklist(pdf *fpdf.Fpdf, tr func(string) string, steps []store.CaseSte
 			meta = append(meta, st.EvidenceURL)
 		}
 		if len(meta) > 0 {
-			pdf.SetFont("Helvetica", "", 7.5)
+			pdf.SetFont("Helvetica", "", 7)
 			pdf.SetTextColor(textDimR, textDimG, textDimB)
 			pdf.SetX(marginL + boxSize + 3)
-			pdf.MultiCell(contentW-boxSize-3, 4.2, tr(strings.Join(meta, "  ·  ")), "", "L", false)
+			pdf.MultiCell(contentW-boxSize-3, stepMetaLineMM, tr(strings.Join(meta, "  ·  ")), "", "L", false)
 		}
 
 		// Step-level uploaded evidence images (if any)
@@ -675,15 +707,15 @@ func drawChecklist(pdf *fpdf.Fpdf, tr func(string) string, steps []store.CaseSte
 				if ext != "jpg" && ext != "jpeg" && ext != "png" && ext != "gif" {
 					continue
 				}
-				pdf.SetFont("Helvetica", "I", 7.3)
+				pdf.SetFont("Helvetica", "I", 7)
 				pdf.SetTextColor(accentR, accentG, accentB)
 				pdf.SetX(marginL + boxSize + 3)
-				pdf.MultiCell(contentW-boxSize-3, 4, tr("Bukti: "+att.OriginalName), "", "L", false)
+				pdf.MultiCell(contentW-boxSize-3, 3.5, tr("Bukti: "+att.OriginalName), "", "L", false)
 				fullPath := filepath.Join(uploadRoot, filepath.FromSlash(att.FilePath))
-				drawCenteredImage(pdf, fullPath, contentW-20, 44)
+				drawImageFit(pdf, fullPath, contentW-boxSize-3, pdfMaxStepEvidenceHMM, marginL+boxSize+3)
 			}
 		}
-		pdf.Ln(1.5)
+		pdf.Ln(afterStepLn)
 	}
 }
 
@@ -911,26 +943,77 @@ func firstImageAttachment(atts []store.CaseAttachment) *store.CaseAttachment {
 	return nil
 }
 
-func drawCenteredImage(pdf *fpdf.Fpdf, fullPath string, maxW, maxH float64) {
-	info := pdf.GetImageInfo(fullPath)
-	if info == nil {
+func pdfContentBottomY() float64 {
+	return pdfPageHeightMM - pdfAutoPageBreakMarginMM
+}
+
+// breakPageIfNotEnoughSpace starts a new page when the cursor is too low to fit needMm.
+func breakPageIfNotEnoughSpace(pdf *fpdf.Fpdf, needMm float64) {
+	if pdf.GetY()+needMm > pdfContentBottomY() {
+		pdf.AddPage()
+	}
+}
+
+// drawLampiranImage scales case-level attachment images so they fit one page; avoids huge Y jumps and blank pages.
+func drawLampiranImage(pdf *fpdf.Fpdf, tr func(string) string, fullPath, ext string) bool {
+	tp := strings.ToLower(ext)
+	if tp == "jpg" {
+		tp = "jpeg"
+	}
+	info := pdf.RegisterImageOptions(fullPath, fpdf.ImageOptions{ImageType: tp, ReadDpi: true})
+	if pdf.Error() != nil || info == nil {
+		pdf.ClearError()
+		return false
+	}
+	wu, hu := info.Width(), info.Height()
+	if wu <= 0 || hu <= 0 {
+		return false
+	}
+	scale := contentW / wu
+	if hu*scale > pdfMaxLampiranImageHMM {
+		scale = pdfMaxLampiranImageHMM / hu
+	}
+	drawW, drawH := wu*scale, hu*scale
+	breakPageIfNotEnoughSpace(pdf, drawH+6)
+	y := pdf.GetY()
+	imgTP := strings.ToUpper(tp)
+	if imgTP == "JPG" {
+		imgTP = "JPEG"
+	}
+	pdf.Image(fullPath, marginL, y, drawW, drawH, false, imgTP, 0, "")
+	pdf.SetY(y + drawH + 4)
+	return true
+}
+
+// drawImageFit places an image scaled to maxW x maxH with top-left at x0.
+func drawImageFit(pdf *fpdf.Fpdf, fullPath string, maxW, maxH, x0 float64) {
+	tp := strings.ToLower(strings.TrimPrefix(filepath.Ext(fullPath), "."))
+	if tp == "jpg" {
+		tp = "jpeg"
+	}
+	info := pdf.RegisterImageOptions(fullPath, fpdf.ImageOptions{ImageType: tp, ReadDpi: true})
+	if pdf.Error() != nil || info == nil {
+		pdf.ClearError()
 		return
 	}
 	w := info.Width()
 	h := info.Height()
+	if w <= 0 || h <= 0 {
+		return
+	}
 	scale := maxW / w
 	if h*scale > maxH {
 		scale = maxH / h
 	}
 	drawW := w * scale
 	drawH := h * scale
-	x := marginL + (contentW-drawW)/2
+	breakPageIfNotEnoughSpace(pdf, drawH+4)
 	y := pdf.GetY()
-	ext := strings.ToUpper(strings.TrimPrefix(filepath.Ext(fullPath), "."))
-	if ext == "JPG" {
-		ext = "JPEG"
+	imgTP := strings.ToUpper(tp)
+	if imgTP == "JPG" {
+		imgTP = "JPEG"
 	}
-	pdf.Image(fullPath, x, y, drawW, drawH, false, ext, 0, "")
+	pdf.Image(fullPath, x0, y, drawW, drawH, false, imgTP, 0, "")
 	pdf.SetY(y + drawH + 3)
 }
 
