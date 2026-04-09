@@ -116,7 +116,7 @@ func TestPDF_ContainsRCAAndOmitsProgressBar(t *testing.T) {
 	for _, needle := range []string{
 		"ROOT CAUSE",
 		"TIMELINE INSIDEN",
-		"ANALISIS 5 WHYS",
+		"ANALISIS",
 		"TEMUAN UTAMA",
 		"PERBAIKAN YANG DITERAPKAN",
 		"PENCEGAHAN & TINDAK LANJUT",
@@ -149,8 +149,8 @@ func TestPDF_EmptyRCA_ShowsPlaceholders(t *testing.T) {
 	for _, needle := range []string{
 		"ROOT CAUSE",
 		"TIMELINE INSIDEN",
-		"ANALISIS 5 WHYS",
-		"Why 1:",
+		"ANALISIS",
+		"Analisis 1:",
 		"TEMUAN UTAMA",
 		"Belum diisi",
 	} {

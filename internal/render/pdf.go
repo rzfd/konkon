@@ -58,9 +58,9 @@ const (
 	afterTitleLn      = 3.0
 	badgeAnchorY      = 10.0 // jarak vertikal blok badge dari baseline
 	afterBadgeLn      = 2.0
-	sectionHdrH       = 6.5
-	sectionHdrFontPt  = 8.0
-	sectionHdrTextY   = 1.2
+	sectionHdrH       = 7.0
+	sectionHdrFontPt  = 8.2
+	sectionHdrTextY   = 1.35
 	afterSectionHdrLn = 1.8
 	metaRowPitchMM    = 7.2
 	metaCardPadTop    = 4.0
@@ -347,21 +347,28 @@ func sectionHeader(pdf *fpdf.Fpdf, title string) {
 	y := pdf.GetY()
 	h := sectionHdrH
 
-	// Full background
+	// Full background (tanpa bilah aksen vertikal — menghindari “sumbu” biru yang mengganggu)
 	pdf.SetFillColor(panel2R, panel2G, panel2B)
 	pdf.Rect(marginL, y, contentW, h, "F")
-
-	// Bold blue left bar
-	pdf.SetFillColor(accentR, accentG, accentB)
-	pdf.Rect(marginL, y, 3.2, h, "F")
 
 	// Title text
 	pdf.SetFont("Helvetica", "B", sectionHdrFontPt)
 	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
 	pdf.SetXY(marginL+6.5, y+sectionHdrTextY)
-	pdf.CellFormat(contentW-7, 4.2, title, "", 1, "L", false, 0, "")
+	pdf.CellFormat(contentW-7, 4.4, title, "", 1, "L", false, 0, "")
 
 	pdf.Ln(afterSectionHdrLn)
+}
+
+// timelineDateLabelID formats a Jakarta-local date like "Sabtu, 04 April 2026".
+func timelineDateLabelID(t time.Time) string {
+	t = t.In(tz.Jakarta)
+	wd := [...]string{"Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"}
+	mo := [...]string{
+		"", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+		"Juli", "Agustus", "September", "Oktober", "November", "Desember",
+	}
+	return fmt.Sprintf("%s, %02d %s %d", wd[t.Weekday()], t.Day(), mo[t.Month()], t.Year())
 }
 
 func metaRow(pdf *fpdf.Fpdf, x, y, w float64, label, value string) {
@@ -396,37 +403,29 @@ func drawBadge(pdf *fpdf.Fpdf, x *float64, y float64, label, value string, rgb [
 
 func drawRootCauseBox(pdf *fpdf.Fpdf, tr func(string) string, text string) {
 	startY := pdf.GetY()
+	body := tr(strings.TrimSpace(text))
 
-	// Accent left bar
+	// Ukur tinggi teks dulu — jangan gambar Rect placeholder tinggi (bug lama: 999mm
+	// menembus halaman dan terlihat sebagai garis biru vertikal panjang).
+	pdf.SetXY(marginL+10, startY+4)
+	pdf.SetFont("Helvetica", "", 9.2)
+	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+	pdf.MultiCell(contentW-14, 5.6, body, "", "L", false)
+	endY := pdf.GetY() + 2
+	barH := endY - startY
+
+	// Aksen kiri tipis saja, setinggi kotak (bukan pilar penuh halaman)
 	pdf.SetFillColor(accentR, accentG, accentB)
-	pdf.Rect(marginL, startY, 4, 999, "F") // placeholder width — will clip naturally
+	pdf.Rect(marginL, startY, 2.6, barH, "F")
 
-	// Text bg
 	pdf.SetFillColor(239, 246, 255) // blue-50
 	pdf.SetDrawColor(191, 219, 254) // blue-200
-	pdf.RoundedRect(marginL+4, startY, contentW-4, 4, 2, "1234", "FD")
+	pdf.RoundedRect(marginL+2.6, startY, contentW-2.6, barH, 2, "1234", "FD")
 
 	pdf.SetXY(marginL+10, startY+4)
 	pdf.SetFont("Helvetica", "", 9.2)
 	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-	pdf.MultiCell(contentW-14, 5.6, tr(strings.TrimSpace(text)), "", "L", false)
-	endY := pdf.GetY() + 2
-
-	// Re-draw the left accent bar with the correct height
-	barH := endY - startY
-	pdf.SetFillColor(accentR, accentG, accentB)
-	pdf.Rect(marginL, startY, 4, barH, "F")
-
-	// Re-draw bg with correct height
-	pdf.SetFillColor(239, 246, 255)
-	pdf.SetDrawColor(191, 219, 254)
-	pdf.RoundedRect(marginL+4, startY, contentW-4, barH, 2, "1234", "FD")
-
-	// Redraw text on top
-	pdf.SetXY(marginL+10, startY+4)
-	pdf.SetFont("Helvetica", "", 9.2)
-	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-	pdf.MultiCell(contentW-14, 5.6, tr(strings.TrimSpace(text)), "", "L", false)
+	pdf.MultiCell(contentW-14, 5.6, body, "", "L", false)
 
 	pdf.SetY(endY)
 }
@@ -471,66 +470,142 @@ func drawTimelineFromText(pdf *fpdf.Fpdf, tr func(string) string, raw string) {
 	}
 
 	dateKey := func(t time.Time) string { return t.In(tz.Jakarta).Format("2006-01-02") }
-	dateLabel := func(t time.Time) string { return t.In(tz.Jakarta).Format("Monday, 02 Jan 2006") }
+	// Alternating date chips: warm sand vs cool blue (mirip referensi timeline).
+	chipStyles := []struct {
+		bg  [3]int
+		fg  [3]int
+		rul [3]int
+	}{
+		{bg: [3]int{217, 197, 154}, fg: [3]int{120, 77, 15}, rul: [3]int{180, 160, 120}},
+		{bg: [3]int{219, 234, 254}, fg: [3]int{30, 64, 175}, rul: [3]int{147, 197, 253}},
+	}
 
-	xLine := marginL + 3.5
-	xTime := marginL + 7.5
-	xText := marginL + 19.0
+	dotPalette := [][3]int{
+		{redR, redG, redB},
+		{orangeR, orangeG, orangeB},
+		{greenR, greenG, greenB},
+		{accentR, accentG, accentB},
+	}
+
+	xLine := marginL + 4.0
+	xTime := marginL + 8.5
+	xText := marginL + 28.0
 	textW := contentW - (xText - marginL)
+	timeColW := xText - xTime - 1.5
 
-	var lastDate string
+	var lastTimedDateKey string
+	dateChipN := -1
+	timedSeen := 0
+	noteRun := false
+
 	for i, it := range items {
 		if it.hasT {
+			noteRun = false
 			k := dateKey(it.t)
-			if k != lastDate {
-				// Date chip + separator line
-				y := pdf.GetY()
-				pdf.SetFillColor(217, 197, 154)
-				chipW := pdf.GetStringWidth(dateLabel(it.t)) + 12
-				pdf.RoundedRect(marginL, y, chipW, 7, 3, "1234", "F")
+			if k != lastTimedDateKey {
+				dateChipN++
+				breakPageIfNotEnoughSpace(pdf, 14)
+				yChip := pdf.GetY()
+				st := chipStyles[dateChipN%len(chipStyles)]
+				label := tr(timelineDateLabelID(it.t))
 				pdf.SetFont("Helvetica", "B", 7.5)
-				pdf.SetTextColor(120, 77, 15)
-				pdf.SetXY(marginL+6, y+1.6)
-				pdf.CellFormat(chipW-8, 4, dateLabel(it.t), "", 0, "L", false, 0, "")
-				pdf.SetDrawColor(borderR, borderG, borderB)
-				pdf.Line(marginL+chipW+4, y+3.6, marginL+contentW, y+3.6)
-				pdf.SetY(y + 9)
-				lastDate = k
+				chipW := pdf.GetStringWidth(label) + 14
+				if chipW < 42 {
+					chipW = 42
+				}
+				pdf.SetFillColor(st.bg[0], st.bg[1], st.bg[2])
+				pdf.RoundedRect(marginL, yChip, chipW, 7.2, 3.2, "1234", "F")
+				pdf.SetTextColor(st.fg[0], st.fg[1], st.fg[2])
+				pdf.SetXY(marginL+7, yChip+1.7)
+				pdf.CellFormat(chipW-12, 4, label, "", 0, "L", false, 0, "")
+				pdf.SetDrawColor(st.rul[0], st.rul[1], st.rul[2])
+				pdf.SetLineWidth(0.25)
+				pdf.Line(marginL+chipW+3, yChip+3.6, marginL+contentW, yChip+3.6)
+				pdf.SetLineWidth(0.2)
+				pdf.SetY(yChip + 9.2)
+				lastTimedDateKey = k
+			}
+		} else {
+			if !noteRun {
+				breakPageIfNotEnoughSpace(pdf, 12)
+				yN := pdf.GetY()
+				pdf.SetFont("Helvetica", "B", 7)
+				pdf.SetTextColor(textMidR, textMidG, textMidB)
+				pdf.SetXY(marginL, yN)
+				pdf.CellFormat(contentW, 4, tr("Entri tanpa stempel waktu"), "", 1, "L", false, 0, "")
+				pdf.SetY(yN + 5.5)
+				noteRun = true
 			}
 		}
 
+		breakPageIfNotEnoughSpace(pdf, 20)
 		y := pdf.GetY()
+		rowTop := y
+
 		if i > 0 {
-			pdf.SetDrawColor(207, 213, 219)
-			pdf.Line(xLine, y-1.5, xLine, y+2.5)
+			pdf.SetDrawColor(203, 213, 225)
+			pdf.SetLineWidth(0.2)
+			pdf.Line(xLine, y-1.2, xLine, y+2.8)
 		}
-		pdf.SetFillColor(accentR, accentG, accentB)
-		pdf.Circle(xLine, y+2.4, 1.2, "F")
+
+		var dotRGB [3]int
+		if it.hasT {
+			dotRGB = dotPalette[timedSeen%len(dotPalette)]
+			timedSeen++
+		} else {
+			dotRGB = [3]int{textDimR, textDimG, textDimB}
+		}
+		pdf.SetFillColor(dotRGB[0], dotRGB[1], dotRGB[2])
+		pdf.Circle(xLine, y+2.8, 1.55, "F")
+		pdf.SetDrawColor(255, 255, 255)
+		pdf.SetLineWidth(0.15)
+		pdf.Circle(xLine, y+2.8, 1.55, "D")
 
 		if it.hasT {
-			pdf.SetFont("Helvetica", "", 7)
+			pdf.SetFont("Helvetica", "B", 6.8)
 			pdf.SetTextColor(textDimR, textDimG, textDimB)
-			pdf.SetXY(xTime, y)
-			pdf.CellFormat(10, 3.8, it.t.In(tz.Jakarta).Format("15:04"), "", 0, "L", false, 0, "")
+			pdf.SetXY(xTime, y+0.8)
+			pdf.CellFormat(timeColW, 3.6, it.t.In(tz.Jakarta).Format("15:04:05"), "", 0, "L", false, 0, "")
 		}
 
-		pdf.SetXY(xText, y)
-		pdf.SetFont("Helvetica", "B", 9)
-		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+		// Event panel (light) — draw after measuring text height.
 		title := it.detail
 		desc := ""
 		if p := strings.SplitN(it.detail, ".", 2); len(p) == 2 {
 			title = strings.TrimSpace(p[0])
 			desc = strings.TrimSpace(p[1])
 		}
-		pdf.MultiCell(textW, 4.2, tr(title), "", "L", false)
+		innerPad := 3.5
+		tx0 := xText
+		pdf.SetXY(tx0+innerPad, rowTop+innerPad)
+		pdf.SetFont("Helvetica", "B", 8.8)
+		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+		pdf.MultiCell(textW-2*innerPad, 4.0, tr(title), "", "L", false)
 		if desc != "" {
-			pdf.SetX(xText)
-			pdf.SetFont("Helvetica", "", 8.2)
+			pdf.SetX(tx0 + innerPad)
+			pdf.SetFont("Helvetica", "", 8)
 			pdf.SetTextColor(textMidR, textMidG, textMidB)
-			pdf.MultiCell(textW, 3.8, tr(desc), "", "L", false)
+			pdf.MultiCell(textW-2*innerPad, 3.7, tr(desc), "", "L", false)
 		}
-		pdf.Ln(1.2)
+		endY := pdf.GetY() + innerPad
+		if endY < rowTop+11 {
+			endY = rowTop + 11
+		}
+		pdf.SetFillColor(panelR, panelG, panelB)
+		pdf.SetDrawColor(borderR, borderG, borderB)
+		pdf.SetLineWidth(0.15)
+		pdf.RoundedRect(tx0, rowTop, textW, endY-rowTop, 2.2, "1234", "FD")
+		pdf.SetXY(tx0+innerPad, rowTop+innerPad)
+		pdf.SetFont("Helvetica", "B", 8.8)
+		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+		pdf.MultiCell(textW-2*innerPad, 4.0, tr(title), "", "L", false)
+		if desc != "" {
+			pdf.SetX(tx0 + innerPad)
+			pdf.SetFont("Helvetica", "", 8)
+			pdf.SetTextColor(textMidR, textMidG, textMidB)
+			pdf.MultiCell(textW-2*innerPad, 3.7, tr(desc), "", "L", false)
+		}
+		pdf.SetY(endY + 1.8)
 	}
 }
 
@@ -578,11 +653,25 @@ func pdfRCATextBlock(pdf *fpdf.Fpdf, tr func(string) string, title, body string)
 		pdf.SetFont("Helvetica", "I", rcaBodyFontPt)
 		pdf.SetTextColor(textDimR, textDimG, textDimB)
 		pdf.MultiCell(contentW, rcaBodyLineMM, tr("(Belum diisi)"), "", "L", false)
-	} else {
-		pdf.SetFont("Helvetica", "", rcaBodyFontPt)
-		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-		pdf.MultiCell(contentW, rcaBodyLineMM, tr(body), "", "L", false)
+		pdf.Ln(afterRcaBlockLn)
+		return
 	}
+	innerW := contentW - 10.0
+	startY := pdf.GetY()
+	pdf.SetFont("Helvetica", "", rcaBodyFontPt)
+	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+	pdf.SetXY(marginL+5, startY+3)
+	pdf.MultiCell(innerW, rcaBodyLineMM, tr(body), "", "L", false)
+	endY := pdf.GetY() + 2
+	pdf.SetFillColor(panelR, panelG, panelB)
+	pdf.SetDrawColor(borderR, borderG, borderB)
+	pdf.SetLineWidth(0.15)
+	pdf.RoundedRect(marginL, startY, contentW, endY-startY, 2.2, "1234", "FD")
+	pdf.SetXY(marginL+5, startY+3)
+	pdf.SetFont("Helvetica", "", rcaBodyFontPt)
+	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+	pdf.MultiCell(innerW, rcaBodyLineMM, tr(body), "", "L", false)
+	pdf.SetY(endY)
 	pdf.Ln(afterRcaBlockLn)
 }
 
@@ -596,14 +685,52 @@ func pdfActionItemsBlock(pdf *fpdf.Fpdf, tr func(string) string, title string, i
 		pdf.Ln(afterRcaBlockLn)
 		return
 	}
-	pdf.SetFont("Helvetica", "", rcaBodyFontPt)
-	pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
-	for i, it := range items {
+	idx := 0
+	for _, it := range items {
 		it = strings.TrimSpace(it)
 		if it == "" {
 			continue
 		}
-		pdf.MultiCell(contentW, rcaBodyLineMM, tr(fmt.Sprintf("%d. %s", i+1, it)), "", "L", false)
+		idx++
+		breakPageIfNotEnoughSpace(pdf, 14)
+		rowY := pdf.GetY()
+		tx := marginL + 11.5
+		tw := contentW - 12.0
+		innerPadX := 3.5
+		innerTop := 2.2
+		minBoxH := 8.2
+		badgeD := 5.2
+		badgeX := marginL + 3.2
+
+		pdf.SetFont("Helvetica", "", rcaBodyFontPt)
+		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+		pdf.SetXY(tx+innerPadX, rowY+innerTop)
+		pdf.MultiCell(tw-7, rcaBodyLineMM, tr(it), "", "L", false)
+		endY := pdf.GetY() + 1.2
+		boxH := endY - rowY
+		if boxH < minBoxH {
+			boxH = minBoxH
+			endY = rowY + boxH
+		}
+		badgeY := rowY + (boxH-badgeD)/2
+		pdf.SetFillColor(accentR, accentG, accentB)
+		pdf.RoundedRect(badgeX, badgeY, badgeD, badgeD, 1.2, "1234", "F")
+		pdf.SetFont("Helvetica", "B", 6.5)
+		pdf.SetTextColor(255, 255, 255)
+		num := fmt.Sprintf("%d", idx)
+		nw := pdf.GetStringWidth(num)
+		pdf.SetXY(badgeX+(badgeD-nw)/2, badgeY+1.1)
+		pdf.CellFormat(nw, 3, num, "", 0, "C", false, 0, "")
+
+		pdf.SetFillColor(239, 246, 255)
+		pdf.SetDrawColor(191, 219, 254)
+		pdf.SetLineWidth(0.12)
+		pdf.RoundedRect(tx, rowY, tw, boxH, 2, "1234", "FD")
+		pdf.SetXY(tx+innerPadX, rowY+innerTop)
+		pdf.SetFont("Helvetica", "", rcaBodyFontPt)
+		pdf.SetTextColor(textPrimaryR, textPrimaryG, textPrimaryB)
+		pdf.MultiCell(tw-7, rcaBodyLineMM, tr(it), "", "L", false)
+		pdf.SetY(endY + 1.6)
 	}
 	pdf.Ln(afterRcaBlockLn)
 }
@@ -626,18 +753,18 @@ func draw5WhysSection(pdf *fpdf.Fpdf, tr func(string) string, whys []string) {
 		}
 	}
 	if len(nonEmpty) == 0 {
-		sectionHeader(pdf, "ANALISIS 5 WHYS")
+		sectionHeader(pdf, "ANALISIS")
 		for i := 0; i < 5; i++ {
 			pdf.SetX(marginL)
 			pdf.SetFont("Helvetica", "I", 8)
 			pdf.SetTextColor(textDimR, textDimG, textDimB)
-			pdf.MultiCell(contentW, whyBodyLineMM, tr(fmt.Sprintf("Why %d: (belum diisi)", i+1)), "", "L", false)
+			pdf.MultiCell(contentW, whyBodyLineMM, tr(fmt.Sprintf("Analisis %d: (belum diisi)", i+1)), "", "L", false)
 		}
 		pdf.Ln(1)
 		return
 	}
 
-	sectionHeader(pdf, "ANALISIS 5 WHYS")
+	sectionHeader(pdf, "ANALISIS")
 
 	dotX := marginL + 6.5
 	cardX := marginL + 16.0
