@@ -808,7 +808,6 @@ async function renderCase(id) {
       <!-- RCA (masuk PDF / HTML / MD export) -->
       <div class="${Card}">
         <h2 class="text-xs font-semibold uppercase tracking-widest text-[#a9b4c4] mb-1 m-0">Analisis RCA</h2>
-        <p class="text-xs text-[#a9b4c4] mb-4">Format mengikuti template <span class="font-mono">RCA_SAFARI_AUTH</span>: Root cause → Timeline → Temuan utama → Perbaikan → Pencegahan/tindak lanjut → Action items → Celah deteksi. Bagian “bukti perilaku sesi” tidak ada. Tombol MD/HTML/PDF menyimpan dulu isian ke server lalu membuka ekspor.</p>
         <div class="space-y-4">
           <div>
             <label class="${LB}">Root cause <span class="text-[#a9b4c4] normal-case tracking-normal font-normal">(opsional)</span></label>
